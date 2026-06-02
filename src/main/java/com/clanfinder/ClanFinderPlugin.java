@@ -31,6 +31,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
 {
     private static final Logger log = LoggerFactory.getLogger(ClanFinderPlugin.class);
     private static final String CLIENT_ID_KEY = "anonymousClientId";
+    private static final String CLANFINDER_BASE_URL = ClanFinderApiClient.DEFAULT_BASE_URL;
 
     @Inject
     private Client client;
@@ -128,7 +129,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         {
             try
             {
-                ClanSearchResponse response = new ClanFinderApiClient(config.apiBaseUrl()).search(request);
+                ClanSearchResponse response = new ClanFinderApiClient(CLANFINDER_BASE_URL).search(request);
                 javax.swing.SwingUtilities.invokeLater(() ->
                 {
                     if (panel != null)
@@ -150,7 +151,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
                         }
                         else
                         {
-                            panel.showError("Could not load approved clan listings. Check the API URL in plugin settings.");
+                            panel.showError("Could not load approved clan listings. Please try again shortly.");
                         }
                     }
                 });
@@ -186,7 +187,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
             return;
         }
 
-        LinkBrowser.browse(ClanFinderApiClient.normalizeBaseUrl(config.websiteBaseUrl()) + "/clans/" + slug);
+        LinkBrowser.browse(CLANFINDER_BASE_URL + "/clans/" + slug);
     }
 
     @Override
@@ -205,7 +206,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         {
             try
             {
-                ClanListing detail = new ClanFinderApiClient(config.apiBaseUrl()).getClan(clan.getSlug());
+                ClanListing detail = new ClanFinderApiClient(CLANFINDER_BASE_URL).getClan(clan.getSlug());
                 javax.swing.SwingUtilities.invokeLater(() ->
                 {
                     if (panel != null)
@@ -242,8 +243,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
             return cleaned;
         }
 
-        String baseUrl = ClanFinderApiClient.normalizeBaseUrl(config.websiteBaseUrl());
-        return cleaned.startsWith("/") ? baseUrl + cleaned : baseUrl + "/" + cleaned;
+        return cleaned.startsWith("/") ? CLANFINDER_BASE_URL + cleaned : CLANFINDER_BASE_URL + "/" + cleaned;
     }
 
     @Override
@@ -278,7 +278,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         {
             try
             {
-                new ClanFinderApiClient(config.apiBaseUrl()).recordActiveUser(getOrCreateClientId());
+                new ClanFinderApiClient(CLANFINDER_BASE_URL).recordActiveUser(getOrCreateClientId());
             }
             catch (Exception ex)
             {

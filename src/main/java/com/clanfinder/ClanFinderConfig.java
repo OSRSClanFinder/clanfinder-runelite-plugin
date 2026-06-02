@@ -10,26 +10,6 @@ public interface ClanFinderConfig extends Config
 {
     String CONFIG_GROUP = "clanfinder";
 
-    @ConfigItem(
-        keyName = "apiBaseUrl",
-        name = "API base URL",
-        description = "ClanFinder website origin used for public API requests."
-    )
-    default String apiBaseUrl()
-    {
-        return ClanFinderApiClient.DEFAULT_BASE_URL;
-    }
-
-    @ConfigItem(
-        keyName = "websiteBaseUrl",
-        name = "Website base URL",
-        description = "ClanFinder website origin used when opening clan detail pages."
-    )
-    default String websiteBaseUrl()
-    {
-        return ClanFinderApiClient.DEFAULT_BASE_URL;
-    }
-
     @Range(
         min = 5,
         max = 50

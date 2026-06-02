@@ -38,9 +38,7 @@ cd clanfinder-runelite-plugin
 ./gradlew run
 ```
 
-The default API and website base URLs point at `https://osrsclanfinder.com`, so developer builds use the live approved
-listings by default. To test against a local Next.js app, change both URLs in the RuneLite config panel to
-`http://localhost:3000`.
+Developer builds use the live approved listings from `https://osrsclanfinder.com` by default.
 
 ## Plugin Hub
 
