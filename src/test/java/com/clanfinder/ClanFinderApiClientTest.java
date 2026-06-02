@@ -52,6 +52,23 @@ public class ClanFinderApiClientTest
     }
 
     @Test
+    public void resolvesOnlyClanFinderAssetUrls()
+    {
+        ClanFinderPlugin plugin = new ClanFinderPlugin();
+
+        assertEquals(
+            "https://osrsclanfinder.com/uploads/banner.png",
+            plugin.resolveAssetUrl("/uploads/banner.png")
+        );
+        assertEquals(
+            "https://osrsclanfinder.com/api/v1/clans/banner-thumbnail?src=%2Fuploads%2Fbanner.webp",
+            plugin.resolveAssetUrl("https://osrsclanfinder.com/api/v1/clans/banner-thumbnail?src=%2Fuploads%2Fbanner.webp")
+        );
+        assertEquals("", plugin.resolveAssetUrl("https://example.com/banner.png"));
+        assertEquals("", plugin.resolveAssetUrl("http://osrsclanfinder.com/banner.png"));
+    }
+
+    @Test
     public void includesDiscordLogoResource() throws Exception
     {
         try (InputStream stream = ClanFinderPanel.class.getResourceAsStream("/discord-logo.png"))

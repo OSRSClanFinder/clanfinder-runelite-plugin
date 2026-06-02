@@ -4,8 +4,8 @@ import com.google.inject.Provides;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.image.BufferedImage;
+import java.net.URI;
 import java.util.function.Consumer;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import javax.inject.Inject;
@@ -30,8 +30,8 @@ import org.slf4j.LoggerFactory;
 public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFinderPanelListener
 {
     private static final Logger log = LoggerFactory.getLogger(ClanFinderPlugin.class);
-    private static final String CLIENT_ID_KEY = "anonymousClientId";
     private static final String CLANFINDER_BASE_URL = ClanFinderApiClient.DEFAULT_BASE_URL;
+    private static final String CLANFINDER_HOST = "osrsclanfinder.com";
 
     @Inject
     private Client client;
@@ -44,9 +44,6 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
 
     @Inject
     private ClanFinderConfig config;
-
-    @Inject
-    private ConfigManager configManager;
 
     private ExecutorService executor;
     private ClanImageCache imageCache;
@@ -75,7 +72,6 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
 
         clientToolbar.addNavigation(navigationButton);
         search(new ClanSearchQuery("", "", "", config.resultsLimit()));
-        pingActiveUser();
         log.debug("ClanFinder started");
     }
 
@@ -240,7 +236,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         String cleaned = assetUrl.trim();
         if (cleaned.startsWith("http://") || cleaned.startsWith("https://"))
         {
-            return cleaned;
+            return isClanFinderAssetUrl(cleaned) ? cleaned : "";
         }
 
         return cleaned.startsWith("/") ? CLANFINDER_BASE_URL + cleaned : CLANFINDER_BASE_URL + "/" + cleaned;
@@ -265,39 +261,16 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         return configManager.getConfig(ClanFinderConfig.class);
     }
 
-    private void pingActiveUser()
+    private static boolean isClanFinderAssetUrl(String value)
     {
-        ExecutorService currentExecutor = executor;
-
-        if (!config.sendAnonymousActivityPing() || currentExecutor == null || currentExecutor.isShutdown())
+        try
         {
-            return;
+            URI uri = URI.create(value);
+            return "https".equalsIgnoreCase(uri.getScheme()) && CLANFINDER_HOST.equalsIgnoreCase(uri.getHost());
         }
-
-        currentExecutor.submit(() ->
+        catch (IllegalArgumentException ex)
         {
-            try
-            {
-                new ClanFinderApiClient(CLANFINDER_BASE_URL).recordActiveUser(getOrCreateClientId());
-            }
-            catch (Exception ex)
-            {
-                log.debug("Unable to send ClanFinder activity ping", ex);
-            }
-        });
-    }
-
-    private String getOrCreateClientId()
-    {
-        String existing = configManager.getConfiguration(ClanFinderConfig.CONFIG_GROUP, CLIENT_ID_KEY);
-
-        if (existing != null && !existing.trim().isEmpty())
-        {
-            return existing;
+            return false;
         }
-
-        String clientId = UUID.randomUUID().toString();
-        configManager.setConfiguration(ClanFinderConfig.CONFIG_GROUP, CLIENT_ID_KEY, clientId);
-        return clientId;
     }
 }

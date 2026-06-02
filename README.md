@@ -11,7 +11,7 @@ does not detect or display live online status for clans or clan members.
 ## What it does
 
 - Reads `GET /api/v1/clans` from the ClanFinder website.
-- Optionally posts an anonymous plugin-session heartbeat to `POST /api/v1/active-users`; this is disabled by default.
+- Opens public clan listing pages only after an explicit user action.
 - Does not request RuneScape credentials, automate gameplay, send chat messages, join clans, scrape private clan data,
   detect online clan/member status, or interact with OSRS clan systems.
 - Uses the ClanFinder website as the source of truth for listings, ownership, moderation, and reporting.
@@ -19,8 +19,8 @@ does not detect or display live online status for clans or clan members.
 ## Privacy and support
 
 The plugin loads public listing JSON, banner thumbnails, and event data from `osrsclanfinder.com`. External requests may
-expose your IP address to that service. The optional anonymous usage count sends a random plugin ID only when enabled in
-RuneLite settings.
+expose your IP address to that service. It does not send your RuneScape account name, clan membership, chat messages,
+or live online status.
 
 Privacy and support information is available at:
 

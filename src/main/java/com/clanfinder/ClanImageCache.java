@@ -22,6 +22,7 @@ final class ClanImageCache
     private static final int READ_TIMEOUT_MILLIS = 8000;
     private static final int MAX_IMAGE_BYTES = 2 * 1024 * 1024;
     private static final int MAX_CACHE_ENTRIES = 80;
+    private static final String CLANFINDER_HOST = "osrsclanfinder.com";
 
     private final ExecutorService executor = Executors.newFixedThreadPool(2, runnable ->
     {
@@ -93,7 +94,7 @@ final class ClanImageCache
     {
         URL url = new URL(value);
         String protocol = url.getProtocol();
-        if (!"https".equalsIgnoreCase(protocol) && !"http".equalsIgnoreCase(protocol))
+        if (!"https".equalsIgnoreCase(protocol) || !CLANFINDER_HOST.equalsIgnoreCase(url.getHost()))
         {
             return null;
         }

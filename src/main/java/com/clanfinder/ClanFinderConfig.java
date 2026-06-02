@@ -23,14 +23,4 @@ public interface ClanFinderConfig extends Config
     {
         return 25;
     }
-
-    @ConfigItem(
-        keyName = "sendAnonymousActivityPing",
-        name = "Anonymous usage count",
-        description = "Send an anonymous plugin-session heartbeat to ClanFinder. This does not report clan or member online status."
-    )
-    default boolean sendAnonymousActivityPing()
-    {
-        return false;
-    }
 }

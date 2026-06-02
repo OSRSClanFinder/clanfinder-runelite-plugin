@@ -1,9 +1,9 @@
 package com.clanfinder;
 
 import com.google.gson.Gson;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -15,6 +15,7 @@ final class ClanFinderApiClient
 
     private static final int CONNECT_TIMEOUT_MILLIS = 5000;
     private static final int READ_TIMEOUT_MILLIS = 8000;
+    private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final String USER_AGENT = "ClanFinder-RuneLite-Plugin/0.1.0";
 
     private final Gson gson = new Gson();
@@ -45,25 +46,6 @@ final class ClanFinderApiClient
         String body = readSuccessfulResponse(connection);
         ClanListing clan = gson.fromJson(body, ClanListing.class);
         return clan == null ? new ClanListing() : clan;
-    }
-
-    void recordActiveUser(String clientId) throws IOException
-    {
-        HttpURLConnection connection = openConnection(baseUrl + "/api/v1/active-users");
-        byte[] payload = gson.toJson(new ActiveUserPayload(clientId)).getBytes(StandardCharsets.UTF_8);
-
-        connection.setRequestMethod("POST");
-        connection.setDoOutput(true);
-        connection.setRequestProperty("Accept", "application/json");
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setFixedLengthStreamingMode(payload.length);
-
-        try (OutputStream stream = connection.getOutputStream())
-        {
-            stream.write(payload);
-        }
-
-        readSuccessfulResponse(connection);
     }
 
     String buildClansUrl(ClanSearchQuery query)
@@ -167,19 +149,24 @@ final class ClanFinderApiClient
             return "";
         }
 
-        try (InputStream response = stream)
+        try (InputStream response = stream; ByteArrayOutputStream output = new ByteArrayOutputStream())
         {
-            return new String(response.readAllBytes(), StandardCharsets.UTF_8);
-        }
-    }
+            byte[] buffer = new byte[8192];
+            int total = 0;
+            int read;
 
-    private static final class ActiveUserPayload
-    {
-        private final String clientId;
+            while ((read = response.read(buffer)) != -1)
+            {
+                total += read;
+                if (total > MAX_RESPONSE_BYTES)
+                {
+                    throw new IOException("ClanFinder API response is too large.");
+                }
 
-        private ActiveUserPayload(String clientId)
-        {
-            this.clientId = clientId;
+                output.write(buffer, 0, read);
+            }
+
+            return output.toString(StandardCharsets.UTF_8.name());
         }
     }
 }
