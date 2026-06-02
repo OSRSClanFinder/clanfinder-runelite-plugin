@@ -8,13 +8,25 @@ Member totals shown in the plugin come from the ClanFinder website listing data.
 Man group stats, the site-provided WOM total is shown; otherwise the manually entered listing count is shown. The plugin
 does not detect or display live online status for clans or clan members.
 
-## Scope
+## What it does
 
 - Reads `GET /api/v1/clans` from the ClanFinder website.
 - Optionally posts an anonymous plugin-session heartbeat to `POST /api/v1/active-users`; this is disabled by default.
 - Does not request RuneScape credentials, automate gameplay, send chat messages, join clans, scrape private clan data,
   detect online clan/member status, or interact with OSRS clan systems.
-- Uses the existing ClanFinder website as the source of truth for listings, ownership, moderation, and reporting.
+- Uses the ClanFinder website as the source of truth for listings, ownership, moderation, and reporting.
+
+## Privacy and support
+
+The plugin loads public listing JSON, banner thumbnails, and event data from `osrsclanfinder.com`. External requests may
+expose your IP address to that service. The optional anonymous usage count sends a random plugin ID only when enabled in
+RuneLite settings.
+
+Privacy and support information is available at:
+
+```txt
+https://osrsclanfinder.com/runelite-plugin
+```
 
 ## Development
 
@@ -30,28 +42,13 @@ The default API and website base URLs point at `https://osrsclanfinder.com`, so 
 listings by default. To test against a local Next.js app, change both URLs in the RuneLite config panel to
 `http://localhost:3000`.
 
-## Plugin Hub Readiness
+## Plugin Hub
 
-This folder follows the RuneLite external plugin shape:
+The plugin uses the standard RuneLite external plugin layout:
 
 - `runelite-plugin.properties` declares display name, support URL, author, tags, plugin class, version, and
   `build=standard`.
-- `plugin-hub-submission.properties` contains the Plugin Hub marker template, including the required external-data
-  warning for osrsclanfinder.com requests.
 - `build.gradle` uses `runeLiteVersion = 'latest.release'` and Java 11 bytecode.
 - `src/test/java/com/clanfinder/ClanFinderPluginTest.java` launches RuneLite in developer mode.
-- Banner images are expected to be served as PNG or JPEG, avoiding third-party ImageIO dependencies during Plugin Hub
-  review.
+- Banner thumbnails are served as PNG or JPEG, avoiding third-party ImageIO dependencies.
 - `LICENSE` uses BSD 2-Clause, matching RuneLite Plugin Hub guidance.
-
-## Commercial Checklist
-
-- Keep the default API and website URLs on the HTTPS production origin.
-- Add API cache headers and server-side monitoring for `/api/v1/clans`.
-- Serve plugin banner thumbnails as PNG or JPEG.
-- Keep the plugin read-only and user-action driven.
-- Publish a clear privacy policy for external ClanFinder data requests and the optional anonymous plugin usage count.
-- Keep `support=` pointed at a public RuneLite plugin support/disclosure page.
-- Add a GitHub issue tracker after the plugin source is moved into its public repository.
-- Submit to `runelite/plugin-hub` with the repository URL, a full commit hash, and the `warning=` line from
-  `plugin-hub-submission.properties` after the first stable release.
