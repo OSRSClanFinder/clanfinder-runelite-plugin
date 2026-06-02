@@ -1,6 +1,6 @@
-# ClanFinder RuneLite Plugin
+# Clan Finder RuneLite Plugin
 
-ClanFinder for RuneLite is a read-only companion plugin for the ClanFinder website. It fetches approved public clan
+Clan Finder for RuneLite is a read-only companion plugin for the ClanFinder website. It fetches approved public clan
 listings, lets players filter them in a RuneLite sidebar panel, copies clan chat names to the clipboard, and opens the
 website listing after an explicit user action.
 

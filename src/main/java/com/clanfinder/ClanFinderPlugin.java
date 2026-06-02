@@ -23,7 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
-    name = "ClanFinder",
+    name = "Clan Finder",
     description = "Browse approved OSRS clan recruitment listings from ClanFinder.",
     tags = {"clan", "clans", "recruitment", "social", "pvm", "raids"}
 )
@@ -64,7 +64,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         imageCache = new ClanImageCache();
         BufferedImage icon = ImageUtil.loadImageResource(ClanFinderPlugin.class, "/clanfinder_icon.png");
         navigationButton = NavigationButton.builder()
-            .tooltip("ClanFinder")
+            .tooltip("Clan Finder")
             .icon(icon)
             .priority(7)
             .panel(panel)
