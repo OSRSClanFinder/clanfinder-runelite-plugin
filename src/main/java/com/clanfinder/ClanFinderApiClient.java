@@ -8,6 +8,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 final class ClanFinderApiClient
 {
@@ -18,12 +19,13 @@ final class ClanFinderApiClient
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final String USER_AGENT = "ClanFinder-RuneLite-Plugin/0.1.0";
 
-    private final Gson gson = new Gson();
+    private final Gson gson;
     private final String baseUrl;
 
-    ClanFinderApiClient(String baseUrl)
+    ClanFinderApiClient(String baseUrl, Gson gson)
     {
         this.baseUrl = normalizeBaseUrl(baseUrl);
+        this.gson = Objects.requireNonNull(gson, "gson");
     }
 
     ClanSearchResponse search(ClanSearchQuery query) throws IOException

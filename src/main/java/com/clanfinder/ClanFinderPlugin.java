@@ -1,5 +1,6 @@
 package com.clanfinder;
 
+import com.google.gson.Gson;
 import com.google.inject.Provides;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
@@ -44,6 +45,9 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
 
     @Inject
     private ClanFinderConfig config;
+
+    @Inject
+    private Gson gson;
 
     private ExecutorService executor;
     private ClanImageCache imageCache;
@@ -125,7 +129,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         {
             try
             {
-                ClanSearchResponse response = new ClanFinderApiClient(CLANFINDER_BASE_URL).search(request);
+                ClanSearchResponse response = new ClanFinderApiClient(CLANFINDER_BASE_URL, gson).search(request);
                 javax.swing.SwingUtilities.invokeLater(() ->
                 {
                     if (panel != null)
@@ -202,7 +206,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         {
             try
             {
-                ClanListing detail = new ClanFinderApiClient(CLANFINDER_BASE_URL).getClan(clan.getSlug());
+                ClanListing detail = new ClanFinderApiClient(CLANFINDER_BASE_URL, gson).getClan(clan.getSlug());
                 javax.swing.SwingUtilities.invokeLater(() ->
                 {
                     if (panel != null)

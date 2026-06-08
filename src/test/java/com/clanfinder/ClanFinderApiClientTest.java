@@ -3,11 +3,14 @@ package com.clanfinder;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
+import com.google.gson.Gson;
 import java.io.InputStream;
 import org.junit.Test;
 
 public class ClanFinderApiClientTest
 {
+    private final Gson gson = new Gson();
+
     @Test
     public void normalizesBaseUrl()
     {
@@ -19,7 +22,7 @@ public class ClanFinderApiClientTest
     @Test
     public void buildsEncodedClanSearchUrl()
     {
-        ClanFinderApiClient client = new ClanFinderApiClient("https://example.com/");
+        ClanFinderApiClient client = new ClanFinderApiClient("https://example.com/", gson);
         ClanSearchQuery query = new ClanSearchQuery("learner raids", "PvM", "AU / NZ", 25);
 
         assertEquals(
@@ -31,7 +34,7 @@ public class ClanFinderApiClientTest
     @Test
     public void buildsPaginatedClanSearchUrl()
     {
-        ClanFinderApiClient client = new ClanFinderApiClient("https://example.com/");
+        ClanFinderApiClient client = new ClanFinderApiClient("https://example.com/", gson);
         ClanSearchQuery query = new ClanSearchQuery("", "", "", 3, 25);
 
         assertEquals(
@@ -43,7 +46,7 @@ public class ClanFinderApiClientTest
     @Test
     public void buildsEncodedClanDetailUrl()
     {
-        ClanFinderApiClient client = new ClanFinderApiClient("https://example.com/");
+        ClanFinderApiClient client = new ClanFinderApiClient("https://example.com/", gson);
 
         assertEquals(
             "https://example.com/api/v1/clans/tangle+crew",
