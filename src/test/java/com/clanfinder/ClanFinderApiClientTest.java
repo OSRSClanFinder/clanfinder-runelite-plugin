@@ -2,6 +2,7 @@ package com.clanfinder;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 import com.google.gson.Gson;
 import java.io.InputStream;
@@ -77,6 +78,16 @@ public class ClanFinderApiClientTest
         try (InputStream stream = ClanFinderPanel.class.getResourceAsStream("/discord-logo.png"))
         {
             assertNotNull(stream);
+        }
+    }
+
+    @Test
+    public void keepsCompletionistIconOptimizedForPluginHub() throws Exception
+    {
+        try (InputStream stream = ClanFinderPanel.class.getResourceAsStream("/game-icons/completionist.png"))
+        {
+            assertNotNull(stream);
+            assertTrue(stream.readAllBytes().length <= 100_000);
         }
     }
 }
