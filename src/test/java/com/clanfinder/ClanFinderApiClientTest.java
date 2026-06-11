@@ -5,7 +5,9 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import com.google.gson.Gson;
+import java.awt.image.BufferedImage;
 import java.io.InputStream;
+import javax.imageio.ImageIO;
 import org.junit.Test;
 
 public class ClanFinderApiClientTest
@@ -82,12 +84,17 @@ public class ClanFinderApiClientTest
     }
 
     @Test
-    public void keepsCompletionistIconOptimizedForPluginHub() throws Exception
+    public void keepsCompletionistIconSizedForPluginHub() throws Exception
     {
         try (InputStream stream = ClanFinderPanel.class.getResourceAsStream("/game-icons/completionist.png"))
         {
             assertNotNull(stream);
-            assertTrue(stream.readAllBytes().length <= 100_000);
+            BufferedImage image = ImageIO.read(stream);
+
+            assertNotNull(image);
+            assertTrue(image.getWidth() <= 32);
+            assertTrue(image.getHeight() <= 32);
+            assertTrue(image.getWidth() * image.getHeight() * 4 <= 100_000);
         }
     }
 }
