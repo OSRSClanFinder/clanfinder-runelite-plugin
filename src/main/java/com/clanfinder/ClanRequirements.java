@@ -8,7 +8,9 @@ final class ClanRequirements
     private int raidKc;
     private boolean discordRequired;
     private boolean applicationRequired;
+    private String applicationInstructions = "";
     private boolean microphoneRequired;
+    private String notes = "";
 
     int getCombatLevel()
     {
@@ -40,8 +42,23 @@ final class ClanRequirements
         return applicationRequired;
     }
 
+    String getApplicationInstructions()
+    {
+        return safe(applicationInstructions);
+    }
+
     boolean isMicrophoneRequired()
     {
         return microphoneRequired;
+    }
+
+    String getNotes()
+    {
+        return safe(notes);
+    }
+
+    private static String safe(String value)
+    {
+        return value == null ? "" : value;
     }
 }

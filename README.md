@@ -11,7 +11,8 @@ does not detect or display live online status for clans or clan members.
 ## What it does
 
 - Reads `GET /api/v1/clans` from the ClanFinder website.
-- Opens public clan listing pages only after an explicit user action.
+- Opens public clan listing pages, the clan registration page, and the ClanFinder Discord invite only after an explicit
+  user action.
 - Does not request RuneScape credentials, automate gameplay, send chat messages, join clans, scrape private clan data,
   detect online clan/member status, or interact with OSRS clan systems.
 - Uses the ClanFinder website as the source of truth for listings, ownership, moderation, and reporting.

@@ -33,6 +33,8 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
     private static final Logger log = LoggerFactory.getLogger(ClanFinderPlugin.class);
     private static final String CLANFINDER_BASE_URL = ClanFinderApiClient.DEFAULT_BASE_URL;
     private static final String CLANFINDER_HOST = "osrsclanfinder.com";
+    private static final String CLAN_REGISTRATION_PATH = "/register-clan";
+    private static final String SUPPORT_DISCORD_URL = "https://discord.gg/MuZZMb4zup";
 
     @Inject
     private Client client;
@@ -174,7 +176,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         clientThread.invoke(() -> client.addChatMessage(
             ChatMessageType.GAMEMESSAGE,
             "",
-            "ClanFinder copied clan chat: " + clanChatName,
+            "ClanFinder copied clan chat to clipboard.",
             null
         ));
     }
@@ -188,6 +190,18 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         }
 
         LinkBrowser.browse(CLANFINDER_BASE_URL + "/clans/" + slug);
+    }
+
+    @Override
+    public void openClanRegistration()
+    {
+        LinkBrowser.browse(CLANFINDER_BASE_URL + CLAN_REGISTRATION_PATH);
+    }
+
+    @Override
+    public void openSupportDiscord()
+    {
+        LinkBrowser.browse(SUPPORT_DISCORD_URL);
     }
 
     @Override

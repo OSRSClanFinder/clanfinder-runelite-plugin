@@ -1,6 +1,7 @@
 package com.clanfinder;
 
 import java.awt.BorderLayout;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
@@ -13,6 +14,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Image;
 import java.awt.Insets;
+import java.awt.Polygon;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.awt.geom.Ellipse2D;
@@ -25,9 +27,13 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -37,14 +43,29 @@ import javax.swing.JComboBox;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
+import javax.swing.JEditorPane;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.JTextPane;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
+import javax.swing.text.AbstractDocument;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.BoxView;
+import javax.swing.text.ComponentView;
+import javax.swing.text.Element;
+import javax.swing.text.IconView;
+import javax.swing.text.LabelView;
+import javax.swing.text.ParagraphView;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
+import javax.swing.text.StyledEditorKit;
+import javax.swing.text.StyledDocument;
+import javax.swing.text.View;
+import javax.swing.text.ViewFactory;
 import net.runelite.client.plugins.worldhopper.WorldHopperPlugin;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.ImageUtil;
@@ -71,6 +92,19 @@ final class ClanFinderPanel extends PluginPanel
     private static final Color CHIP_BORDER = new Color(74, 77, 84);
     private static final Color ACTION_BACKGROUND = new Color(62, 65, 71);
     private static final Color ACTION_PRIMARY = new Color(70, 94, 122);
+    private static final Color ACTION_SUCCESS = new Color(61, 111, 78);
+    private static final Color ACTION_DISCORD = new Color(88, 101, 242);
+    private static final Pattern DECIMAL_HTML_ENTITY_PATTERN = Pattern.compile("&#(\\d{1,7});");
+    private static final Pattern HEX_HTML_ENTITY_PATTERN = Pattern.compile("&#x([0-9a-fA-F]{1,6});");
+    private static final String[] EMOJI_FONT_CANDIDATES = {
+        "Apple Color Emoji",
+        "Segoe UI Emoji",
+        "Noto Color Emoji",
+        "Apple Symbols",
+        Font.DIALOG
+    };
+    private static final String EMOJI_FONT_FAMILY = findEmojiFontFamily();
+    private static final Map<String, Icon> EMOJI_ICON_CACHE = new HashMap<>();
     private static final int CARD_WIDTH = PluginPanel.PANEL_WIDTH - 36;
     private static final int CONTENT_TEXT_WIDTH = CARD_WIDTH - 28;
     private static final int CONTENT_ACTION_WIDTH = CONTENT_TEXT_WIDTH;
@@ -129,6 +163,7 @@ final class ClanFinderPanel extends PluginPanel
     private final JComboBox<ClanTypeOption> typeSelect = new JComboBox<>(TYPES);
     private final JComboBox<RegionOption> regionSelect = new JComboBox<>(REGIONS);
     private final JLabel statusLabel = new JLabel("Ready");
+    private final JPanel controlsWrapper;
     private final JPanel resultsPanel = new JPanel();
     private final List<ClanListing> displayedClans = new ArrayList<>();
     private ClanSearchQuery currentQuery = new ClanSearchQuery("", "", "", 25);
@@ -151,7 +186,8 @@ final class ClanFinderPanel extends PluginPanel
         resultsPanel.setBackground(PANEL_BACKGROUND);
         resultsPanel.setOpaque(true);
 
-        add(buildControlsWrapper(), BorderLayout.NORTH);
+        controlsWrapper = buildControlsWrapper();
+        add(controlsWrapper, BorderLayout.NORTH);
         JScrollPane scrollPane = new JScrollPane(resultsPanel);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.setBackground(PANEL_BACKGROUND);
@@ -169,6 +205,7 @@ final class ClanFinderPanel extends PluginPanel
 
     void showLoading()
     {
+        setControlsVisible(true);
         loadingMore = false;
         currentPage = 1;
         displayedCount = 0;
@@ -185,6 +222,7 @@ final class ClanFinderPanel extends PluginPanel
 
     void showLoadingMore()
     {
+        setControlsVisible(true);
         loadingMore = true;
         removeSeeMoreButton();
         statusLabel.setText("Loading more approved clans...");
@@ -243,6 +281,7 @@ final class ClanFinderPanel extends PluginPanel
 
     void showClanDetailLoading(ClanListing clan)
     {
+        setControlsVisible(true);
         loadingMore = false;
         statusLabel.setText("Loading " + clan.getName() + " events...");
         resultsPanel.removeAll();
@@ -262,12 +301,25 @@ final class ClanFinderPanel extends PluginPanel
 
     void showClanDetail(ClanListing clan, String notice)
     {
+        setControlsVisible(true);
         loadingMore = false;
         statusLabel.setText(clan.getName() + " events");
         resultsPanel.removeAll();
         resultsPanel.add(buildBackButtonRow());
         resultsPanel.add(Box.createVerticalStrut(8));
         resultsPanel.add(buildClanDetailPage(clan, notice));
+        refreshResults();
+    }
+
+    void showAddClanPage()
+    {
+        setControlsVisible(false);
+        loadingMore = false;
+        statusLabel.setText("Add a clan");
+        resultsPanel.removeAll();
+        resultsPanel.add(buildBackButtonRow());
+        resultsPanel.add(Box.createVerticalStrut(8));
+        resultsPanel.add(buildAddClanPage());
         refreshResults();
     }
 
@@ -306,6 +358,13 @@ final class ClanFinderPanel extends PluginPanel
         constraints.fill = GridBagConstraints.HORIZONTAL;
         constraints.insets = new Insets(0, 0, 6, 0);
 
+        JLabel title = new JLabel("Clan Finder");
+        title.setForeground(TEXT_PRIMARY);
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16.2f));
+        title.setBorder(new EmptyBorder(0, 0, 2, 0));
+        controls.add(title, constraints);
+
+        constraints.gridy++;
         controls.add(searchField, constraints);
 
         constraints.gridy++;
@@ -321,6 +380,14 @@ final class ClanFinderPanel extends PluginPanel
 
         constraints.gridy++;
         controls.add(refreshButton, constraints);
+
+        JButton addClanButton = new JButton("Add Clan", new PlusIcon());
+        styleActionButton(addClanButton, ACTION_SUCCESS);
+        addClanButton.setIconTextGap(7);
+        addClanButton.addActionListener(event -> showAddClanPage());
+
+        constraints.gridy++;
+        controls.add(addClanButton, constraints);
 
         searchField.addActionListener(event -> requestSearch());
         typeSelect.addActionListener(event -> requestSearch());
@@ -496,6 +563,76 @@ final class ClanFinderPanel extends PluginPanel
 
         page.add(Box.createVerticalStrut(5));
         page.add(buildDetailActions(clan));
+
+        lockPanelWidth(page, CARD_WIDTH);
+        return page;
+    }
+
+    private JPanel buildAddClanPage()
+    {
+        JPanel page = new RoundedPanel(CARD_BACKGROUND, CARD_BORDER, 8);
+        page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
+        page.setAlignmentX(Component.CENTER_ALIGNMENT);
+        page.setMaximumSize(new Dimension(CARD_WIDTH, Integer.MAX_VALUE));
+        page.setBorder(new EmptyBorder(12, 12, 12, 12));
+
+        JLabel title = new JLabel("Add Your Clan");
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        title.setForeground(TEXT_PRIMARY);
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16.4f));
+
+        JLabel subtitle = new JLabel("Clan Finder listing");
+        subtitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        subtitle.setForeground(TEXT_MUTED);
+        subtitle.setFont(subtitle.getFont().deriveFont(Font.BOLD, 10.8f));
+
+        JPanel message = new RoundedPanel(DESCRIPTION_BACKGROUND, DESCRIPTION_BORDER, 7);
+        message.setLayout(new BoxLayout(message, BoxLayout.Y_AXIS));
+        message.setAlignmentX(Component.LEFT_ALIGNMENT);
+        message.setBorder(new EmptyBorder(10, 10, 10, 10));
+        message.add(buildTextBlock(
+            "Join OSRS' best clan directory. Share your clan with players looking for the right community, events, and goals.",
+            CONTENT_TEXT_WIDTH - 20,
+            Font.PLAIN,
+            TEXT_SECONDARY,
+            BODY_TEXT_FONT_SIZE
+        ));
+        message.add(Box.createVerticalStrut(8));
+        message.add(buildTextBlock(
+            "To have your clan listed on Clan Finder, simply list your clan on the site.",
+            CONTENT_TEXT_WIDTH - 20,
+            Font.PLAIN,
+            TEXT_SECONDARY,
+            BODY_TEXT_FONT_SIZE
+        ));
+        lockPanelWidth(message, CONTENT_TEXT_WIDTH);
+
+        JButton listButton = new JButton("List Clan on Site", new GlobeRegionIcon());
+        styleActionButton(listButton, ACTION_PRIMARY);
+        listButton.setIconTextGap(7);
+        listButton.setMaximumSize(new Dimension(CONTENT_ACTION_WIDTH, 32));
+        listButton.setPreferredSize(new Dimension(CONTENT_ACTION_WIDTH, 32));
+        listButton.addActionListener(event -> listener.openClanRegistration());
+
+        JButton discordButton = new JButton("Open Discord Invite", discordIcon());
+        styleActionButton(discordButton, ACTION_DISCORD);
+        discordButton.setIconTextGap(7);
+        discordButton.setMaximumSize(new Dimension(CONTENT_ACTION_WIDTH, 32));
+        discordButton.setPreferredSize(new Dimension(CONTENT_ACTION_WIDTH, 32));
+        discordButton.addActionListener(event -> listener.openSupportDiscord());
+
+        listButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+        discordButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        page.add(title);
+        page.add(Box.createVerticalStrut(3));
+        page.add(subtitle);
+        page.add(Box.createVerticalStrut(10));
+        page.add(message);
+        page.add(Box.createVerticalStrut(10));
+        page.add(listButton);
+        page.add(Box.createVerticalStrut(6));
+        page.add(discordButton);
 
         lockPanelWidth(page, CARD_WIDTH);
         return page;
@@ -717,41 +854,77 @@ final class ClanFinderPanel extends PluginPanel
 
     private static JLabel buildWrappedLabel(String value, int width, int style, Color color)
     {
-        JLabel label = new JLabel("<html><body style='width:" + width + "px'>" + escapeHtml(value) + "</body></html>");
+        JLabel label = new JLabel("<html><body style='width:" + width + "px'>" + escapeHtml(normalizeDisplayText(value)) + "</body></html>");
         label.setForeground(color);
-        label.setFont(label.getFont().deriveFont(style, 11.5f));
+        label.setFont(displayTextFont(style, 11.5f));
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
         label.setMaximumSize(new Dimension(width, Short.MAX_VALUE));
         return label;
     }
 
-    private static JTextArea buildTextBlock(String value, int width, int style, Color color)
+    private static JTextPane buildTextBlock(String value, int width, int style, Color color)
     {
         return buildTextBlock(value, width, style, color, 11.5f);
     }
 
-    private static JTextArea buildTextBlock(String value, int width, int style, Color color, float size)
+    private static JTextPane buildTextBlock(String value, int width, int style, Color color, float size)
     {
-        JTextArea area = new JTextArea(normalizeDisplayText(value));
-        area.setOpaque(false);
-        area.setEditable(false);
-        area.setFocusable(false);
-        area.setLineWrap(true);
-        area.setWrapStyleWord(true);
-        area.setForeground(color);
-        area.setFont(area.getFont().deriveFont(style, size));
-        area.setBorder(new EmptyBorder(0, 0, 0, 0));
-        area.setAlignmentX(Component.LEFT_ALIGNMENT);
-        area.setSize(new Dimension(width, Short.MAX_VALUE));
+        Font textFont = displayTextFont(style, size);
+        JTextPane pane = new WrappingTextPane(width);
+        pane.setEditorKit(new WrappingStyledEditorKit());
+        pane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+        pane.setOpaque(false);
+        pane.setEditable(false);
+        pane.setFocusable(false);
+        pane.setForeground(color);
+        pane.setFont(textFont);
+        pane.setBorder(new EmptyBorder(0, 0, 0, 0));
+        pane.setAlignmentX(Component.LEFT_ALIGNMENT);
+        insertStyledText(
+            pane.getStyledDocument(),
+            addSoftBreaks(normalizeMultilineDisplayText(value)),
+            textAttributes(textFont.getFamily(), style, size, color),
+            textAttributes(EMOJI_FONT_FAMILY, Font.PLAIN, size, color)
+        );
 
-        Dimension preferred = area.getPreferredSize();
-        int lineHeight = area.getFontMetrics(area.getFont()).getHeight();
-        int height = Math.max(lineHeight, preferred.height + 1);
+        pane.setSize(new Dimension(width, Integer.MAX_VALUE));
+        Dimension preferred = pane.getPreferredSize();
+        int lineHeight = pane.getFontMetrics(textFont).getHeight();
+        int height = Math.max(lineHeight, preferred.height + Math.max(2, lineHeight / 4));
         Dimension fixed = new Dimension(width, height);
-        area.setPreferredSize(fixed);
-        area.setMinimumSize(fixed);
-        area.setMaximumSize(fixed);
-        return area;
+        pane.setPreferredSize(fixed);
+        pane.setMinimumSize(fixed);
+        pane.setMaximumSize(fixed);
+        return pane;
+    }
+
+    private static String addSoftBreaks(String value)
+    {
+        StringBuilder builder = new StringBuilder(value.length() + 16);
+        int unbroken = 0;
+        for (int offset = 0; offset < value.length();)
+        {
+            int codePoint = value.codePointAt(offset);
+            builder.appendCodePoint(codePoint);
+
+            if (Character.isWhitespace(codePoint) || codePoint == '\n')
+            {
+                unbroken = 0;
+            }
+            else
+            {
+                unbroken++;
+                if (codePoint == '/' || codePoint == '.' || codePoint == '-' || codePoint == '_' || codePoint == ':' || unbroken >= 18)
+                {
+                    builder.append('\u200B');
+                    unbroken = 0;
+                }
+            }
+
+            offset += Character.charCount(codePoint);
+        }
+
+        return builder.toString();
     }
 
     private JPanel buildRequirementsPanel(ClanListing clan, int width)
@@ -768,9 +941,23 @@ final class ClanFinderPanel extends PluginPanel
         panel.add(label);
         panel.add(Box.createVerticalStrut(4));
 
-        List<String> requirements = detailRequirementLines(clan);
-        String summary = requirements.isEmpty() ? "Open requirements" : String.join(" | ", requirements);
-        panel.add(buildTextBlock(summary, width - 16, Font.PLAIN, TEXT_SECONDARY, REQUIREMENTS_FONT_SIZE));
+        List<String> requirements = summaryRequirementLines(clan);
+        if (requirements.isEmpty())
+        {
+            panel.add(buildRequirementBullet("Open requirements", width - 16));
+        }
+        else
+        {
+            for (int i = 0; i < requirements.size(); i++)
+            {
+                if (i > 0)
+                {
+                    panel.add(Box.createVerticalStrut(3));
+                }
+
+                panel.add(buildRequirementBullet(requirements.get(i), width - 16));
+            }
+        }
 
         Dimension preferred = panel.getPreferredSize();
         Dimension fixed = new Dimension(width, preferred.height);
@@ -801,7 +988,7 @@ final class ClanFinderPanel extends PluginPanel
                     panel.add(Box.createVerticalStrut(4));
                 }
 
-                panel.add(buildTextBlock(requirements.get(i), width - 16, Font.PLAIN, TEXT_SECONDARY, REQUIREMENTS_FONT_SIZE));
+                panel.add(buildRequirementBullet(requirements.get(i), width - 16));
             }
         }
 
@@ -811,6 +998,37 @@ final class ClanFinderPanel extends PluginPanel
         panel.setMinimumSize(fixed);
         panel.setMaximumSize(fixed);
         return panel;
+    }
+
+    private static JPanel buildRequirementBullet(String value, int width)
+    {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel dot = new JLabel(new RequirementDotIcon());
+        dot.setPreferredSize(new Dimension(12, 16));
+        dot.setMinimumSize(new Dimension(12, 16));
+
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.gridx = 0;
+        constraints.gridy = 0;
+        constraints.anchor = GridBagConstraints.NORTHWEST;
+        constraints.insets = new Insets(4, 0, 0, 5);
+        row.add(dot, constraints);
+
+        constraints.gridx = 1;
+        constraints.weightx = 1;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+        constraints.insets = new Insets(0, 0, 0, 0);
+        row.add(buildTextBlock(value, width - 17, Font.PLAIN, TEXT_SECONDARY, REQUIREMENTS_FONT_SIZE), constraints);
+
+        Dimension preferred = row.getPreferredSize();
+        Dimension fixed = new Dimension(width, preferred.height);
+        row.setPreferredSize(fixed);
+        row.setMinimumSize(fixed);
+        row.setMaximumSize(fixed);
+        return row;
     }
 
     private void requestSearch()
@@ -842,6 +1060,7 @@ final class ClanFinderPanel extends PluginPanel
 
     private void showCachedResults()
     {
+        setControlsVisible(true);
         resultsPanel.removeAll();
         for (ClanListing clan : displayedClans)
         {
@@ -861,9 +1080,10 @@ final class ClanFinderPanel extends PluginPanel
         row.setAlignmentX(Component.CENTER_ALIGNMENT);
         row.setMaximumSize(new Dimension(CARD_WIDTH, 38));
 
-        JButton button = new JButton("< Back to clans");
+        JButton button = new JButton("Back to clans", new BackArrowIcon());
         styleActionButton(button, ACTION_BACKGROUND);
         button.setFont(button.getFont().deriveFont(Font.BOLD, BACK_BUTTON_FONT_SIZE));
+        button.setIconTextGap(7);
         button.setPreferredSize(new Dimension(CARD_WIDTH, 34));
         button.addActionListener(event -> showCachedResults());
         row.add(button, BorderLayout.CENTER);
@@ -1067,32 +1287,32 @@ final class ClanFinderPanel extends PluginPanel
 
     private static String summaryText(ClanListing clan)
     {
-        String headline = clan.getHeadline().trim();
+        String headline = normalizeDisplayText(clan.getHeadline());
         if (!headline.isEmpty())
         {
             return truncate(headline, 112);
         }
 
-        return truncate(clan.getDescription().trim(), 112);
+        return truncate(normalizeDisplayText(clan.getDescription()), 112);
     }
 
     private static String detailDescriptionText(ClanListing clan)
     {
-        String description = clan.getDescription().replaceAll("\\s+", " ").trim();
+        String description = normalizeMultilineDisplayText(clan.getDescription());
         if (!description.isEmpty())
         {
             return description;
         }
 
-        return clan.getHeadline().replaceAll("\\s+", " ").trim();
+        return normalizeDisplayText(clan.getHeadline());
     }
 
     private static String aboutSentenceText(ClanListing clan)
     {
-        String text = clan.getDescription().replaceAll("\\s+", " ").trim();
+        String text = normalizeDisplayText(clan.getDescription());
         if (text.isEmpty())
         {
-            text = clan.getHeadline().replaceAll("\\s+", " ").trim();
+            text = normalizeDisplayText(clan.getHeadline());
         }
 
         if (text.isEmpty())
@@ -1109,9 +1329,627 @@ final class ClanFinderPanel extends PluginPanel
         return truncate(text, 156);
     }
 
-    private static String normalizeDisplayText(String value)
+    static String normalizeDisplayText(String value)
     {
-        return value == null ? "" : value.replaceAll("\\s+", " ").trim();
+        return normalizeMultilineDisplayText(value).replaceAll("\\s+", " ").trim();
+    }
+
+    static String normalizeMultilineDisplayText(String value)
+    {
+        String text = value == null ? "" : value;
+        text = text
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .replaceAll("(?i)<br\\s*/?>", "\n")
+            .replaceAll("(?i)</(?:p|div)>", "\n\n")
+            .replaceAll("<[^>]+>", "");
+        text = decodeHtmlEntities(text)
+            .replace('\u00a0', ' ')
+            .replaceAll("[ \\t\\x0B\\f]+", " ")
+            .replaceAll(" *\\n *", "\n")
+            .replaceAll("\\n{3,}", "\n\n")
+            .trim();
+        return text;
+    }
+
+    static Font displayTextFont(int style, float size)
+    {
+        return new Font(Font.DIALOG, style, Math.max(1, Math.round(size))).deriveFont(style, size);
+    }
+
+    static String emojiFontFamily()
+    {
+        return EMOJI_FONT_FAMILY;
+    }
+
+    private static String findEmojiFontFamily()
+    {
+        int[] requiredCodePoints = {0x1F389, 0x1F3B2, 0x1F4B0};
+        for (String candidate : EMOJI_FONT_CANDIDATES)
+        {
+            Font font = new Font(candidate, Font.PLAIN, 14);
+            boolean supported = true;
+            for (int codePoint : requiredCodePoints)
+            {
+                if (!font.canDisplay(codePoint))
+                {
+                    supported = false;
+                    break;
+                }
+            }
+
+            if (supported)
+            {
+                return font.getFamily();
+            }
+        }
+
+        return Font.DIALOG;
+    }
+
+    private static SimpleAttributeSet textAttributes(String family, int style, float size, Color color)
+    {
+        SimpleAttributeSet attributes = new SimpleAttributeSet();
+        StyleConstants.setFontFamily(attributes, family == null || family.isEmpty() ? Font.DIALOG : family);
+        StyleConstants.setFontSize(attributes, Math.max(1, Math.round(size)));
+        StyleConstants.setBold(attributes, (style & Font.BOLD) != 0);
+        StyleConstants.setItalic(attributes, (style & Font.ITALIC) != 0);
+        StyleConstants.setForeground(attributes, color);
+        return attributes;
+    }
+
+    private static void insertStyledText(StyledDocument document, String text, SimpleAttributeSet textAttributes, SimpleAttributeSet emojiAttributes)
+    {
+        for (int offset = 0; offset < text.length();)
+        {
+            int codePoint = text.codePointAt(offset);
+            if (codePoint == 0xFE0F)
+            {
+                offset += Character.charCount(codePoint);
+                continue;
+            }
+
+            Icon emojiIcon = emojiIcon(codePoint, StyleConstants.getFontSize(textAttributes));
+            if (emojiIcon != null)
+            {
+                SimpleAttributeSet iconAttributes = new SimpleAttributeSet();
+                StyleConstants.setIcon(iconAttributes, emojiIcon);
+                try
+                {
+                    document.insertString(document.getLength(), " ", iconAttributes);
+                }
+                catch (BadLocationException ex)
+                {
+                    throw new IllegalStateException("Unable to render ClanFinder emoji.", ex);
+                }
+
+                offset += Character.charCount(codePoint);
+                continue;
+            }
+
+            String segment = new String(Character.toChars(codePoint));
+            try
+            {
+                document.insertString(
+                    document.getLength(),
+                    segment,
+                    isEmojiCodePoint(codePoint) ? emojiAttributes : textAttributes
+                );
+            }
+            catch (BadLocationException ex)
+            {
+                throw new IllegalStateException("Unable to render ClanFinder text.", ex);
+            }
+
+            offset += Character.charCount(codePoint);
+        }
+
+        SimpleAttributeSet paragraphAttributes = new SimpleAttributeSet();
+        StyleConstants.setAlignment(paragraphAttributes, StyleConstants.ALIGN_LEFT);
+        document.setParagraphAttributes(0, document.getLength(), paragraphAttributes, false);
+    }
+
+    private static boolean isEmojiCodePoint(int codePoint)
+    {
+        return codePoint == 0xFE0F
+            || codePoint == 0x200D
+            || (codePoint >= 0x2600 && codePoint <= 0x27BF)
+            || (codePoint >= 0x1F000 && codePoint <= 0x1FAFF);
+    }
+
+    static boolean hasGeneratedEmojiIcon(int codePoint)
+    {
+        return emojiIcon(codePoint, 14) != null;
+    }
+
+    private static Icon emojiIcon(int codePoint, int fontSize)
+    {
+        switch (codePoint)
+        {
+            case 0x2620:
+            case 0x2694:
+            case 0x1F332:
+            case 0x1F37B:
+            case 0x1F389:
+            case 0x1F3B2:
+            case 0x1F426:
+            case 0x1F43C:
+            case 0x1F49D:
+            case 0x1F4C5:
+            case 0x1F4C6:
+            case 0x1F4E3:
+            case 0x1F525:
+            case 0x1F4B0:
+            case 0x1F4B5:
+            case 0x1F5E3:
+            case 0x1F916:
+            case 0x1F917:
+            case 0x1F91D:
+            case 0x1F4CA:
+                return cachedEmojiIcon(codePoint, fontSize);
+            default:
+                if (isEmojiCodePoint(codePoint) && codePoint != 0x200D && codePoint != 0xFE0F)
+                {
+                    return cachedEmojiIcon(codePoint, fontSize);
+                }
+
+                return null;
+        }
+    }
+
+    private static Icon cachedEmojiIcon(int codePoint, int fontSize)
+    {
+        int size = Math.max(15, Math.round(fontSize * 1.25f));
+        String cacheKey = codePoint + ":" + size;
+        synchronized (EMOJI_ICON_CACHE)
+        {
+            Icon cached = EMOJI_ICON_CACHE.get(cacheKey);
+            if (cached != null)
+            {
+                return cached;
+            }
+
+            Icon icon = new ImageIcon(drawEmojiIcon(codePoint, size));
+            EMOJI_ICON_CACHE.put(cacheKey, icon);
+            return icon;
+        }
+    }
+
+    private static BufferedImage drawEmojiIcon(int codePoint, int size)
+    {
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try
+        {
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            switch (codePoint)
+            {
+                case 0x2620:
+                    drawSkullEmoji(graphics, size);
+                    break;
+                case 0x2694:
+                    drawSwordEmoji(graphics, size);
+                    break;
+                case 0x1F332:
+                    drawTreeEmoji(graphics, size);
+                    break;
+                case 0x1F37B:
+                    drawBeerEmoji(graphics, size);
+                    break;
+                case 0x1F389:
+                    drawPartyEmoji(graphics, size);
+                    break;
+                case 0x1F3B2:
+                    drawDiceEmoji(graphics, size);
+                    break;
+                case 0x1F426:
+                    drawBirdEmoji(graphics, size);
+                    break;
+                case 0x1F43C:
+                    drawPandaEmoji(graphics, size);
+                    break;
+                case 0x1F49D:
+                    drawGiftHeartEmoji(graphics, size);
+                    break;
+                case 0x1F4C5:
+                case 0x1F4C6:
+                    drawCalendarEmoji(graphics, size);
+                    break;
+                case 0x1F4E3:
+                    drawMegaphoneEmoji(graphics, size);
+                    break;
+                case 0x1F525:
+                    drawFireEmoji(graphics, size);
+                    break;
+                case 0x1F4B0:
+                    drawMoneyBagEmoji(graphics, size);
+                    break;
+                case 0x1F4B5:
+                    drawMoneyEmoji(graphics, size);
+                    break;
+                case 0x1F5E3:
+                    drawSpeakingHeadEmoji(graphics, size);
+                    break;
+                case 0x1F916:
+                    drawRobotEmoji(graphics, size);
+                    break;
+                case 0x1F917:
+                    drawHugEmoji(graphics, size);
+                    break;
+                case 0x1F91D:
+                    drawHandshakeEmoji(graphics, size);
+                    break;
+                case 0x1F4CA:
+                    drawChartEmoji(graphics, size);
+                    break;
+                default:
+                    drawGenericEmoji(graphics, size);
+                    break;
+            }
+        }
+        finally
+        {
+            graphics.dispose();
+        }
+
+        return image;
+    }
+
+    private static void drawSkullEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(232, 235, 240));
+        graphics.fillOval(size / 5, size / 7, size * 3 / 5, size * 3 / 5);
+        graphics.fillRoundRect(size * 3 / 10, size * 3 / 5, size * 2 / 5, size / 5, size / 10, size / 10);
+        graphics.setColor(new Color(48, 52, 60));
+        graphics.fillOval(size / 3 - size / 12, size * 2 / 5 - size / 12, size / 6, size / 6);
+        graphics.fillOval(size * 2 / 3 - size / 12, size * 2 / 5 - size / 12, size / 6, size / 6);
+        graphics.fillOval(size / 2 - size / 14, size / 2, size / 7, size / 8);
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 14f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size / 4, size * 7 / 8, size * 3 / 4, size * 5 / 8);
+        graphics.drawLine(size * 3 / 4, size * 7 / 8, size / 4, size * 5 / 8);
+    }
+
+    private static void drawSwordEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setStroke(new BasicStroke(Math.max(1.2f, size / 8f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.setColor(new Color(218, 225, 234));
+        graphics.drawLine(size / 4, size * 3 / 4, size * 3 / 4, size / 4);
+        graphics.drawLine(size * 3 / 4, size * 3 / 4, size / 4, size / 4);
+        graphics.setColor(new Color(242, 198, 71));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 10f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size / 4, size / 2, size / 2, size * 3 / 4);
+        graphics.drawLine(size * 3 / 4, size / 2, size / 2, size * 3 / 4);
+    }
+
+    private static void drawTreeEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(93, 64, 45));
+        graphics.fillRoundRect(size * 7 / 16, size * 3 / 5, size / 8, size / 4, size / 16, size / 16);
+        graphics.setColor(new Color(42, 127, 76));
+        Polygon lower = new Polygon(
+            new int[] {size / 2, size / 6, size * 5 / 6},
+            new int[] {size / 5, size * 7 / 10, size * 7 / 10},
+            3
+        );
+        graphics.fillPolygon(lower);
+        graphics.setColor(new Color(55, 154, 86));
+        Polygon upper = new Polygon(
+            new int[] {size / 2, size / 4, size * 3 / 4},
+            new int[] {size / 10, size / 2, size / 2},
+            3
+        );
+        graphics.fillPolygon(upper);
+    }
+
+    private static void drawBeerEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(245, 186, 64));
+        graphics.fillRoundRect(size / 6, size / 3, size / 4, size / 2, size / 12, size / 12);
+        graphics.fillRoundRect(size * 3 / 5, size / 3, size / 4, size / 2, size / 12, size / 12);
+        graphics.setColor(new Color(248, 236, 188));
+        graphics.fillOval(size / 8, size / 4, size / 3, size / 5);
+        graphics.fillOval(size * 7 / 12, size / 4, size / 3, size / 5);
+        graphics.setColor(new Color(222, 156, 43));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 13f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size * 2 / 5, size / 2, size * 3 / 5, size / 3);
+        graphics.drawLine(size * 3 / 5, size / 2, size * 2 / 5, size / 3);
+    }
+
+    private static void drawPartyEmoji(Graphics2D graphics, int size)
+    {
+        Polygon cone = new Polygon(
+            new int[] {size / 5, size * 4 / 5, size / 3},
+            new int[] {size * 4 / 5, size * 2 / 5, size / 5},
+            3
+        );
+        graphics.setColor(new Color(239, 196, 84));
+        graphics.fillPolygon(cone);
+        graphics.setColor(new Color(91, 151, 222));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 12f)));
+        graphics.drawLine(size / 3, size * 3 / 5, size * 3 / 5, size / 2);
+        graphics.setColor(new Color(220, 86, 118));
+        graphics.drawLine(size / 4, size * 2 / 3, size / 2, size / 2);
+        graphics.setColor(new Color(94, 196, 129));
+        graphics.fillOval(size * 2 / 3, size / 8, Math.max(2, size / 6), Math.max(2, size / 6));
+        graphics.setColor(new Color(226, 81, 96));
+        graphics.fillOval(size * 4 / 5, size / 3, Math.max(2, size / 7), Math.max(2, size / 7));
+        graphics.setColor(new Color(86, 148, 222));
+        graphics.fillOval(size / 2, size / 9, Math.max(2, size / 8), Math.max(2, size / 8));
+    }
+
+    private static void drawDiceEmoji(Graphics2D graphics, int size)
+    {
+        int pad = Math.max(1, size / 8);
+        graphics.setColor(new Color(242, 244, 248));
+        graphics.fillRoundRect(pad, pad, size - pad * 2, size - pad * 2, size / 4, size / 4);
+        graphics.setColor(new Color(146, 154, 166));
+        graphics.drawRoundRect(pad, pad, size - pad * 2, size - pad * 2, size / 4, size / 4);
+        graphics.setColor(new Color(38, 42, 49));
+        int dot = Math.max(2, size / 6);
+        int left = size / 3 - dot / 2;
+        int mid = size / 2 - dot / 2;
+        int right = size * 2 / 3 - dot / 2;
+        int top = size / 3 - dot / 2;
+        int bottom = size * 2 / 3 - dot / 2;
+        graphics.fillOval(left, top, dot, dot);
+        graphics.fillOval(right, top, dot, dot);
+        graphics.fillOval(mid, mid, dot, dot);
+        graphics.fillOval(left, bottom, dot, dot);
+        graphics.fillOval(right, bottom, dot, dot);
+    }
+
+    private static void drawBirdEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(91, 151, 222));
+        graphics.fillOval(size / 5, size / 4, size * 3 / 5, size / 2);
+        graphics.setColor(new Color(128, 181, 235));
+        graphics.fillOval(size / 8, size * 2 / 5, size / 3, size / 4);
+        graphics.setColor(new Color(239, 182, 67));
+        Polygon beak = new Polygon(
+            new int[] {size * 3 / 4, size * 9 / 10, size * 3 / 4},
+            new int[] {size * 2 / 5, size / 2, size * 3 / 5},
+            3
+        );
+        graphics.fillPolygon(beak);
+        graphics.setColor(new Color(34, 38, 45));
+        graphics.fillOval(size * 3 / 5, size * 2 / 5, Math.max(2, size / 9), Math.max(2, size / 9));
+    }
+
+    private static void drawPandaEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(45, 49, 56));
+        graphics.fillOval(size / 7, size / 8, size / 4, size / 4);
+        graphics.fillOval(size * 5 / 8, size / 8, size / 4, size / 4);
+        graphics.setColor(new Color(239, 241, 245));
+        graphics.fillOval(size / 6, size / 5, size * 2 / 3, size * 2 / 3);
+        graphics.setColor(new Color(45, 49, 56));
+        graphics.fillOval(size / 3 - size / 9, size * 2 / 5 - size / 10, size / 5, size / 4);
+        graphics.fillOval(size * 2 / 3 - size / 9, size * 2 / 5 - size / 10, size / 5, size / 4);
+        graphics.fillOval(size / 2 - size / 14, size * 3 / 5, size / 7, size / 10);
+    }
+
+    private static void drawGiftHeartEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(221, 78, 126));
+        graphics.fillOval(size / 5, size / 4, size / 3, size / 3);
+        graphics.fillOval(size * 7 / 15, size / 4, size / 3, size / 3);
+        Polygon point = new Polygon(
+            new int[] {size / 6, size * 5 / 6, size / 2},
+            new int[] {size * 2 / 5, size * 2 / 5, size * 4 / 5},
+            3
+        );
+        graphics.fillPolygon(point);
+        graphics.setColor(new Color(244, 196, 91));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 12f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size / 4, size / 2, size * 3 / 4, size / 2);
+        graphics.drawLine(size / 2, size / 4, size / 2, size * 4 / 5);
+    }
+
+    private static void drawMoneyBagEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(116, 176, 89));
+        graphics.fillOval(size / 5, size / 3, size * 3 / 5, size / 2);
+        graphics.setColor(new Color(94, 145, 72));
+        graphics.fillRoundRect(size * 2 / 5, size / 5, size / 5, size / 4, size / 8, size / 8);
+        graphics.setColor(new Color(238, 212, 106));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 12f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size * 2 / 5, size / 2, size * 3 / 5, size / 2);
+        graphics.drawLine(size / 2, size / 2, size / 2, size * 3 / 4);
+        graphics.drawLine(size * 2 / 5, size * 3 / 4, size * 3 / 5, size * 3 / 4);
+    }
+
+    private static void drawCalendarEmoji(Graphics2D graphics, int size)
+    {
+        int pad = Math.max(1, size / 8);
+        graphics.setColor(new Color(238, 241, 246));
+        graphics.fillRoundRect(pad, pad + size / 10, size - pad * 2, size - pad * 2, size / 6, size / 6);
+        graphics.setColor(new Color(211, 75, 85));
+        graphics.fillRoundRect(pad, pad + size / 10, size - pad * 2, size / 4, size / 6, size / 6);
+        graphics.setColor(new Color(84, 94, 110));
+        int dot = Math.max(1, size / 10);
+        graphics.fillOval(size / 3 - dot / 2, size / 2 - dot / 2, dot, dot);
+        graphics.fillOval(size / 2 - dot / 2, size / 2 - dot / 2, dot, dot);
+        graphics.fillOval(size * 2 / 3 - dot / 2, size / 2 - dot / 2, dot, dot);
+        graphics.fillOval(size / 3 - dot / 2, size * 2 / 3 - dot / 2, dot, dot);
+        graphics.fillOval(size / 2 - dot / 2, size * 2 / 3 - dot / 2, dot, dot);
+        graphics.fillOval(size * 2 / 3 - dot / 2, size * 2 / 3 - dot / 2, dot, dot);
+    }
+
+    private static void drawMegaphoneEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(239, 241, 245));
+        Polygon horn = new Polygon(
+            new int[] {size / 5, size * 3 / 4, size * 3 / 4, size / 5},
+            new int[] {size * 2 / 5, size / 5, size * 4 / 5, size * 3 / 5},
+            4
+        );
+        graphics.fillPolygon(horn);
+        graphics.setColor(new Color(220, 86, 118));
+        graphics.fillRoundRect(size / 8, size * 2 / 5, size / 5, size / 5, size / 12, size / 12);
+        graphics.setColor(new Color(91, 151, 222));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 12f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size * 4 / 5, size / 3, size * 9 / 10, size / 4);
+        graphics.drawLine(size * 4 / 5, size / 2, size * 9 / 10, size / 2);
+        graphics.drawLine(size * 4 / 5, size * 2 / 3, size * 9 / 10, size * 3 / 4);
+    }
+
+    private static void drawFireEmoji(Graphics2D graphics, int size)
+    {
+        Polygon flame = new Polygon(
+            new int[] {size / 2, size * 3 / 4, size * 2 / 3, size / 2, size / 3, size / 4},
+            new int[] {size / 8, size / 2, size * 5 / 6, size * 9 / 10, size * 5 / 6, size / 2},
+            6
+        );
+        graphics.setColor(new Color(226, 81, 96));
+        graphics.fillPolygon(flame);
+        Polygon inner = new Polygon(
+            new int[] {size / 2, size * 3 / 5, size / 2, size * 2 / 5},
+            new int[] {size * 2 / 5, size * 2 / 3, size * 5 / 6, size * 2 / 3},
+            4
+        );
+        graphics.setColor(new Color(248, 190, 73));
+        graphics.fillPolygon(inner);
+    }
+
+    private static void drawMoneyEmoji(Graphics2D graphics, int size)
+    {
+        int pad = Math.max(1, size / 7);
+        graphics.setColor(new Color(95, 169, 93));
+        graphics.fillRoundRect(pad, size / 4, size - pad * 2, size / 2, size / 7, size / 7);
+        graphics.setColor(new Color(185, 222, 154));
+        graphics.fillOval(size / 2 - size / 6, size / 2 - size / 6, size / 3, size / 3);
+        graphics.setColor(new Color(54, 118, 64));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 12f)));
+        graphics.drawLine(size / 3, size / 2, size * 2 / 3, size / 2);
+        graphics.drawRoundRect(pad, size / 4, size - pad * 2, size / 2, size / 7, size / 7);
+    }
+
+    private static void drawSpeakingHeadEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(236, 190, 132));
+        graphics.fillOval(size / 6, size / 5, size / 2, size / 2);
+        graphics.fillRoundRect(size / 3, size * 3 / 5, size / 5, size / 4, size / 12, size / 12);
+        graphics.setColor(new Color(68, 76, 90));
+        graphics.fillArc(size / 8, size / 8, size * 3 / 5, size / 2, 20, 200);
+        graphics.setColor(new Color(52, 58, 68));
+        graphics.fillRect(size / 3, size * 3 / 4, size / 3, size / 9);
+        graphics.setColor(new Color(91, 151, 222));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 13f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size * 2 / 3, size * 2 / 5, size * 9 / 10, size / 3);
+        graphics.drawLine(size * 2 / 3, size / 2, size * 9 / 10, size / 2);
+        graphics.drawLine(size * 2 / 3, size * 3 / 5, size * 9 / 10, size * 2 / 3);
+    }
+
+    private static void drawRobotEmoji(Graphics2D graphics, int size)
+    {
+        int pad = Math.max(2, size / 7);
+        graphics.setColor(new Color(190, 198, 210));
+        graphics.fillRoundRect(pad, size / 4, size - pad * 2, size * 3 / 5, size / 8, size / 8);
+        graphics.setColor(new Color(91, 151, 222));
+        graphics.fillOval(size / 3 - size / 12, size / 2 - size / 12, size / 6, size / 6);
+        graphics.fillOval(size * 2 / 3 - size / 12, size / 2 - size / 12, size / 6, size / 6);
+        graphics.setColor(new Color(84, 94, 110));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 14f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size / 2, size / 4, size / 2, size / 10);
+        graphics.drawLine(size / 3, size * 2 / 3, size * 2 / 3, size * 2 / 3);
+    }
+
+    private static void drawHugEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setColor(new Color(245, 196, 85));
+        graphics.fillOval(size / 5, size / 7, size * 3 / 5, size * 3 / 5);
+        graphics.setColor(new Color(82, 68, 49));
+        graphics.fillOval(size / 3, size * 2 / 5, Math.max(2, size / 10), Math.max(2, size / 10));
+        graphics.fillOval(size * 3 / 5, size * 2 / 5, Math.max(2, size / 10), Math.max(2, size / 10));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 14f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawArc(size / 3, size / 2, size / 3, size / 5, 200, 140);
+        graphics.setColor(new Color(245, 196, 85));
+        graphics.setStroke(new BasicStroke(Math.max(2f, size / 7f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size / 6, size * 2 / 3, size / 3, size * 4 / 5);
+        graphics.drawLine(size * 5 / 6, size * 2 / 3, size * 2 / 3, size * 4 / 5);
+    }
+
+    private static void drawHandshakeEmoji(Graphics2D graphics, int size)
+    {
+        graphics.setStroke(new BasicStroke(Math.max(2f, size / 7f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.setColor(new Color(221, 156, 89));
+        graphics.drawLine(size / 5, size / 2, size / 2, size * 2 / 3);
+        graphics.setColor(new Color(238, 183, 104));
+        graphics.drawLine(size * 4 / 5, size / 2, size / 2, size * 2 / 3);
+        graphics.setColor(new Color(103, 145, 211));
+        graphics.setStroke(new BasicStroke(Math.max(2f, size / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawLine(size / 8, size * 2 / 5, size / 4, size / 2);
+        graphics.setColor(new Color(91, 178, 133));
+        graphics.drawLine(size * 7 / 8, size * 2 / 5, size * 3 / 4, size / 2);
+    }
+
+    private static void drawChartEmoji(Graphics2D graphics, int size)
+    {
+        int base = size * 4 / 5;
+        int barWidth = Math.max(2, size / 5);
+        graphics.setColor(new Color(91, 151, 222));
+        graphics.fillRoundRect(size / 6, size / 2, barWidth, base - size / 2, size / 12, size / 12);
+        graphics.setColor(new Color(94, 196, 129));
+        graphics.fillRoundRect(size * 2 / 5, size / 3, barWidth, base - size / 3, size / 12, size / 12);
+        graphics.setColor(new Color(220, 86, 118));
+        graphics.fillRoundRect(size * 2 / 3, size / 5, barWidth, base - size / 5, size / 12, size / 12);
+        graphics.setColor(new Color(188, 195, 206));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 14f)));
+        graphics.drawLine(size / 8, base, size * 7 / 8, base);
+    }
+
+    private static void drawGenericEmoji(Graphics2D graphics, int size)
+    {
+        int pad = Math.max(1, size / 8);
+        graphics.setColor(new Color(70, 94, 122));
+        graphics.fillRoundRect(pad, pad, size - pad * 2, size - pad * 2, size / 4, size / 4);
+        graphics.setColor(new Color(236, 236, 236));
+        graphics.setStroke(new BasicStroke(Math.max(1f, size / 12f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.drawArc(size / 3, size / 3, size / 3, size / 3, 200, 140);
+        graphics.fillOval(size / 3, size * 2 / 5, Math.max(1, size / 10), Math.max(1, size / 10));
+        graphics.fillOval(size * 3 / 5, size * 2 / 5, Math.max(1, size / 10), Math.max(1, size / 10));
+    }
+
+    private static String decodeHtmlEntities(String value)
+    {
+        String decoded = value
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'");
+
+        decoded = decodeNumericEntities(decoded, HEX_HTML_ENTITY_PATTERN, 16);
+        return decodeNumericEntities(decoded, DECIMAL_HTML_ENTITY_PATTERN, 10);
+    }
+
+    private static String decodeNumericEntities(String value, Pattern pattern, int radix)
+    {
+        Matcher matcher = pattern.matcher(value);
+        StringBuffer buffer = new StringBuffer();
+        while (matcher.find())
+        {
+            String replacement = matcher.group(0);
+            try
+            {
+                int codePoint = Integer.parseInt(matcher.group(1), radix);
+                if (Character.isValidCodePoint(codePoint))
+                {
+                    replacement = new String(Character.toChars(codePoint));
+                }
+            }
+            catch (NumberFormatException ignored)
+            {
+                replacement = matcher.group(0);
+            }
+
+            matcher.appendReplacement(buffer, Matcher.quoteReplacement(replacement));
+        }
+
+        matcher.appendTail(buffer);
+        return buffer.toString();
     }
 
     private static int firstSentenceEnd(String value)
@@ -1175,10 +2013,12 @@ final class ClanFinderPanel extends PluginPanel
         return !requirementsText(clan).isEmpty()
             || requirements.isDiscordRequired()
             || requirements.isApplicationRequired()
-            || requirements.isMicrophoneRequired();
+            || requirements.isMicrophoneRequired()
+            || !requirements.getApplicationInstructions().isEmpty()
+            || !requirements.getNotes().isEmpty();
     }
 
-    private static List<String> detailRequirementLines(ClanListing clan)
+    private static List<String> summaryRequirementLines(ClanListing clan)
     {
         List<String> lines = new ArrayList<>();
         ClanRequirements requirements = clan.getRequirements();
@@ -1216,6 +2056,24 @@ final class ClanFinderPanel extends PluginPanel
         if (requirements.isMicrophoneRequired())
         {
             lines.add("Microphone required");
+        }
+
+        return lines;
+    }
+
+    private static List<String> detailRequirementLines(ClanListing clan)
+    {
+        List<String> lines = summaryRequirementLines(clan);
+        ClanRequirements requirements = clan.getRequirements();
+
+        if (!requirements.getApplicationInstructions().isEmpty())
+        {
+            lines.add("Application: " + requirements.getApplicationInstructions());
+        }
+
+        if (!requirements.getNotes().isEmpty())
+        {
+            lines.add(requirements.getNotes());
         }
 
         return lines;
@@ -1326,6 +2184,11 @@ final class ClanFinderPanel extends PluginPanel
 
     private void refreshResults()
     {
+        if (controlsWrapper != null)
+        {
+            controlsWrapper.revalidate();
+            controlsWrapper.repaint();
+        }
         resultsPanel.revalidate();
         resultsPanel.repaint();
         Component parent = resultsPanel.getParent();
@@ -1336,6 +2199,16 @@ final class ClanFinderPanel extends PluginPanel
         }
         revalidate();
         repaint();
+    }
+
+    private void setControlsVisible(boolean visible)
+    {
+        if (controlsWrapper != null && controlsWrapper.isVisible() != visible)
+        {
+            controlsWrapper.setVisible(visible);
+            revalidate();
+            repaint();
+        }
     }
 
     private void addSeeMoreButtonIfNeeded()
@@ -1538,6 +2411,94 @@ final class ClanFinderPanel extends PluginPanel
         }
     }
 
+    private static final class WrappingTextPane extends JTextPane
+    {
+        private final int width;
+
+        private WrappingTextPane(int width)
+        {
+            this.width = width;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth()
+        {
+            return true;
+        }
+
+        @Override
+        public Dimension getPreferredSize()
+        {
+            Dimension preferred = super.getPreferredSize();
+            return new Dimension(width, preferred.height);
+        }
+    }
+
+    private static final class WrappingStyledEditorKit extends StyledEditorKit
+    {
+        private final ViewFactory viewFactory = new WrappingViewFactory();
+
+        @Override
+        public ViewFactory getViewFactory()
+        {
+            return viewFactory;
+        }
+    }
+
+    private static final class WrappingViewFactory implements ViewFactory
+    {
+        @Override
+        public View create(Element element)
+        {
+            String name = element.getName();
+            if (AbstractDocument.ContentElementName.equals(name))
+            {
+                return new WrappingLabelView(element);
+            }
+
+            if (AbstractDocument.ParagraphElementName.equals(name))
+            {
+                return new ParagraphView(element);
+            }
+
+            if (AbstractDocument.SectionElementName.equals(name))
+            {
+                return new BoxView(element, View.Y_AXIS);
+            }
+
+            if (StyleConstants.ComponentElementName.equals(name))
+            {
+                return new ComponentView(element);
+            }
+
+            if (StyleConstants.IconElementName.equals(name))
+            {
+                return new IconView(element);
+            }
+
+            return new LabelView(element);
+        }
+    }
+
+    private static final class WrappingLabelView extends LabelView
+    {
+        private WrappingLabelView(Element element)
+        {
+            super(element);
+        }
+
+        @Override
+        public float getMinimumSpan(int axis)
+        {
+            if (axis == View.X_AXIS)
+            {
+                return 0;
+            }
+
+            return super.getMinimumSpan(axis);
+        }
+    }
+
     interface ClanFinderPanelListener
     {
         void search(ClanSearchQuery query);
@@ -1547,6 +2508,10 @@ final class ClanFinderPanel extends PluginPanel
         void openClan(String slug);
 
         void viewClan(ClanListing clan);
+
+        void openClanRegistration();
+
+        void openSupportDiscord();
 
         String resolveAssetUrl(String assetUrl);
 
@@ -1830,6 +2795,113 @@ final class ClanFinderPanel extends PluginPanel
                 g.drawArc(2, 2, 10, 10, 35, 285);
                 g.drawLine(11, 1, 11, 5);
                 g.drawLine(11, 1, 7, 1);
+            }
+            finally
+            {
+                g.dispose();
+            }
+        }
+    }
+
+    private static final class PlusIcon implements Icon
+    {
+        private static final int SIZE = 14;
+
+        @Override
+        public int getIconWidth()
+        {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight()
+        {
+            return SIZE;
+        }
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y)
+        {
+            Graphics2D g = (Graphics2D) graphics.create();
+            try
+            {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.translate(x, y);
+                g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g.setColor(TEXT_PRIMARY);
+                g.drawLine(SIZE / 2, 3, SIZE / 2, SIZE - 3);
+                g.drawLine(3, SIZE / 2, SIZE - 3, SIZE / 2);
+            }
+            finally
+            {
+                g.dispose();
+            }
+        }
+    }
+
+    private static final class BackArrowIcon implements Icon
+    {
+        private static final int WIDTH = 14;
+        private static final int HEIGHT = 14;
+
+        @Override
+        public int getIconWidth()
+        {
+            return WIDTH;
+        }
+
+        @Override
+        public int getIconHeight()
+        {
+            return HEIGHT;
+        }
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y)
+        {
+            Graphics2D g = (Graphics2D) graphics.create();
+            try
+            {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.translate(x, y);
+                g.setStroke(new BasicStroke(1.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g.setColor(TEXT_PRIMARY);
+                g.drawLine(9, 3, 5, HEIGHT / 2);
+                g.drawLine(5, HEIGHT / 2, 9, HEIGHT - 3);
+                g.drawLine(5, HEIGHT / 2, WIDTH - 2, HEIGHT / 2);
+            }
+            finally
+            {
+                g.dispose();
+            }
+        }
+    }
+
+    private static final class RequirementDotIcon implements Icon
+    {
+        private static final int SIZE = 6;
+
+        @Override
+        public int getIconWidth()
+        {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight()
+        {
+            return SIZE;
+        }
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y)
+        {
+            Graphics2D g = (Graphics2D) graphics.create();
+            try
+            {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(TEXT_MUTED);
+                g.fillOval(x, y, SIZE, SIZE);
             }
             finally
             {
