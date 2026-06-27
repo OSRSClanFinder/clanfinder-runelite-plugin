@@ -1,14 +1,28 @@
 package com.clanfinder;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import com.google.gson.Gson;
+import java.awt.Component;
 import java.awt.Font;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
+import javax.swing.JButton;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.SwingUtilities;
 import org.junit.Test;
 
 public class ClanFinderApiClientTest
@@ -56,6 +70,28 @@ public class ClanFinderApiClientTest
             "https://example.com/api/v1/clans/tangle+crew",
             client.buildClanUrl("tangle crew")
         );
+    }
+
+    @Test
+    public void retriesTransientSearchFailure() throws Exception
+    {
+        String body = "{\"data\":[{\"slug\":\"one\",\"name\":\"One Clan\"}],\"pagination\":{\"page\":1,\"limit\":25,\"total\":1}}";
+        try (ServerSocket server = new ServerSocket(0))
+        {
+            AtomicReference<Exception> serverFailure = new AtomicReference<>();
+            Thread serverThread = new Thread(() -> serveFailedThenSuccessfulResponse(server, body, serverFailure));
+            serverThread.setDaemon(true);
+            serverThread.start();
+
+            ClanFinderApiClient client = new ClanFinderApiClient("http://127.0.0.1:" + server.getLocalPort(), gson);
+            ClanSearchResponse response = client.search(new ClanSearchQuery("", "", "", 25));
+
+            serverThread.join(5000);
+            assertFalse(serverThread.isAlive());
+            assertNull(serverFailure.get());
+            assertEquals(1, response.getData().size());
+            assertEquals("One Clan", response.getData().get(0).getName());
+        }
     }
 
     @Test
@@ -163,5 +199,204 @@ public class ClanFinderApiClientTest
         assertTrue(ClanFinderPanel.hasGeneratedEmojiIcon(0x1F91D));
         assertTrue(ClanFinderPanel.hasGeneratedEmojiIcon(0x1F4CA));
         assertTrue(ClanFinderPanel.hasGeneratedEmojiIcon(0x1F600));
+    }
+
+    @Test
+    public void freshResultsStartAtTopOfScrollPane() throws Exception
+    {
+        ClanFinderPanel panel = new ClanFinderPanel(new NoopPanelListener());
+        ClanSearchResponse response = gson.fromJson(
+            "{\"data\":[{\"slug\":\"one\",\"name\":\"One Clan\",\"description\":\"Long enough listing text for a result card.\"}]," +
+                "\"pagination\":{\"page\":1,\"limit\":25,\"total\":1}}",
+            ClanSearchResponse.class
+        );
+
+        SwingUtilities.invokeAndWait(() ->
+        {
+            panel.showResults(response);
+            JScrollPane scrollPane = findScrollPane(panel);
+            assertNotNull(scrollPane);
+            scrollPane.getVerticalScrollBar().setValues(120, 20, 0, 500);
+            panel.showResults(response);
+        });
+        SwingUtilities.invokeAndWait(() -> { });
+
+        JScrollPane scrollPane = findScrollPane(panel);
+        assertNotNull(scrollPane);
+        assertEquals(0, scrollPane.getVerticalScrollBar().getValue());
+    }
+
+    @Test
+    public void searchControlsCanBeCollapsedAndExpanded() throws Exception
+    {
+        ClanFinderPanel panel = new ClanFinderPanel(new NoopPanelListener());
+
+        SwingUtilities.invokeAndWait(() ->
+        {
+            JButton toggle = findNamedComponent(panel, "search-toggle-button", JButton.class);
+            JPanel controls = findNamedComponent(panel, "search-controls-panel", JPanel.class);
+            assertNotNull(toggle);
+            assertNotNull(controls);
+
+            assertTrue(controls.isVisible());
+            assertEquals("Hide search controls", toggle.getToolTipText());
+
+            toggle.doClick();
+            assertFalse(controls.isVisible());
+            assertEquals("Show search controls", toggle.getToolTipText());
+
+            toggle.doClick();
+            assertTrue(controls.isVisible());
+            assertEquals("Hide search controls", toggle.getToolTipText());
+        });
+    }
+
+    private static JScrollPane findScrollPane(Component component)
+    {
+        if (component instanceof JScrollPane)
+        {
+            return (JScrollPane) component;
+        }
+
+        if (component instanceof java.awt.Container)
+        {
+            for (Component child : ((java.awt.Container) component).getComponents())
+            {
+                JScrollPane scrollPane = findScrollPane(child);
+                if (scrollPane != null)
+                {
+                    return scrollPane;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static <T extends Component> T findNamedComponent(Component component, String name, Class<T> type)
+    {
+        if (type.isInstance(component) && name.equals(component.getName()))
+        {
+            return type.cast(component);
+        }
+
+        if (component instanceof java.awt.Container)
+        {
+            for (Component child : ((java.awt.Container) component).getComponents())
+            {
+                T match = findNamedComponent(child, name, type);
+                if (match != null)
+                {
+                    return match;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static void serveFailedThenSuccessfulResponse(ServerSocket server, String body, AtomicReference<Exception> failure)
+    {
+        try
+        {
+            try (Socket first = server.accept())
+            {
+                readHttpRequest(first);
+            }
+
+            try (Socket second = server.accept())
+            {
+                readHttpRequest(second);
+                writeJsonResponse(second, body);
+            }
+        }
+        catch (Exception ex)
+        {
+            failure.set(ex);
+        }
+    }
+
+    private static void readHttpRequest(Socket socket) throws IOException
+    {
+        socket.setSoTimeout(5000);
+        InputStream input = socket.getInputStream();
+        int previous = -1;
+        int matched = 0;
+        int read;
+        while ((read = input.read()) != -1)
+        {
+            if ((matched == 0 || matched == 2) && read == '\r' ||
+                (matched == 1 || matched == 3) && read == '\n')
+            {
+                matched++;
+                if (matched == 4)
+                {
+                    return;
+                }
+            }
+            else
+            {
+                matched = previous == '\r' && read == '\n' ? 2 : 0;
+            }
+            previous = read;
+        }
+    }
+
+    private static void writeJsonResponse(Socket socket, String body) throws IOException
+    {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        String headers = "HTTP/1.1 200 OK\r\n" +
+            "Content-Type: application/json\r\n" +
+            "Content-Length: " + bytes.length + "\r\n" +
+            "Connection: close\r\n\r\n";
+        OutputStream output = socket.getOutputStream();
+        output.write(headers.getBytes(StandardCharsets.US_ASCII));
+        output.write(bytes);
+        output.flush();
+    }
+
+    private static final class NoopPanelListener implements ClanFinderPanel.ClanFinderPanelListener
+    {
+        @Override
+        public void search(ClanSearchQuery query)
+        {
+        }
+
+        @Override
+        public void copyClanChat(String clanChatName)
+        {
+        }
+
+        @Override
+        public void openClan(String slug)
+        {
+        }
+
+        @Override
+        public void openClanRegistration()
+        {
+        }
+
+        @Override
+        public void openSupportDiscord()
+        {
+        }
+
+        @Override
+        public void viewClan(ClanListing clan)
+        {
+        }
+
+        @Override
+        public String resolveAssetUrl(String assetUrl)
+        {
+            return "";
+        }
+
+        @Override
+        public void loadImage(String assetUrl, int width, int height, Consumer<BufferedImage> callback)
+        {
+            callback.accept(null);
+        }
     }
 }

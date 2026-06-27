@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
     name = "Clan Finder",
-    description = "Browse approved OSRS clan recruitment listings from ClanFinder.",
+    description = "Browse approved OSRS clan recruitment listings from Clan Finder.",
     tags = {"clan", "clans", "recruitment", "social", "pvm", "raids"}
 )
 public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFinderPanelListener
@@ -55,6 +55,8 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
     private ClanImageCache imageCache;
     private ClanFinderPanel panel;
     private NavigationButton navigationButton;
+    private ClanSearchQuery lastSuccessfulSearchQuery;
+    private ClanSearchResponse lastSuccessfulSearchResponse;
 
     @Override
     protected void startUp()
@@ -78,7 +80,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
 
         clientToolbar.addNavigation(navigationButton);
         search(new ClanSearchQuery("", "", "", config.resultsLimit()));
-        log.debug("ClanFinder started");
+        log.debug("Clan Finder started");
     }
 
     @Override
@@ -103,7 +105,9 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         panel = null;
         executor = null;
         imageCache = null;
-        log.debug("ClanFinder stopped");
+        lastSuccessfulSearchQuery = null;
+        lastSuccessfulSearchResponse = null;
+        log.debug("Clan Finder stopped");
     }
 
     @Override
@@ -132,6 +136,11 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
             try
             {
                 ClanSearchResponse response = new ClanFinderApiClient(CLANFINDER_BASE_URL, gson).search(request);
+                if (request.getPage() == 1)
+                {
+                    lastSuccessfulSearchQuery = request;
+                    lastSuccessfulSearchResponse = response;
+                }
                 javax.swing.SwingUtilities.invokeLater(() ->
                 {
                     if (panel != null)
@@ -142,7 +151,9 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
             }
             catch (Exception ex)
             {
-                log.warn("Unable to load ClanFinder listings", ex);
+                log.warn("Unable to load Clan Finder listings", ex);
+                ClanSearchResponse cachedResponse = lastSuccessfulSearchResponse;
+                boolean canShowCachedResponse = request.getPage() == 1 && cachedResponse != null && sameSearch(request, lastSuccessfulSearchQuery);
                 javax.swing.SwingUtilities.invokeLater(() ->
                 {
                     if (panel != null)
@@ -153,7 +164,14 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
                         }
                         else
                         {
-                            panel.showError("Could not load approved clan listings. Please try again shortly.");
+                            if (canShowCachedResponse)
+                            {
+                                panel.showCachedResults(cachedResponse, "Could not refresh clans. Showing last loaded results.");
+                            }
+                            else
+                            {
+                                panel.showError("Could not load approved clan listings. Please try again shortly.");
+                            }
                         }
                     }
                 });
@@ -176,9 +194,23 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
         clientThread.invoke(() -> client.addChatMessage(
             ChatMessageType.GAMEMESSAGE,
             "",
-            "ClanFinder copied clan chat to clipboard.",
+            "Clan Finder copied clan chat to clipboard.",
             null
         ));
+    }
+
+    private static boolean sameSearch(ClanSearchQuery left, ClanSearchQuery right)
+    {
+        if (left == null || right == null)
+        {
+            return false;
+        }
+
+        return left.getPage() == right.getPage()
+            && left.getLimit() == right.getLimit()
+            && left.getSearch().equals(right.getSearch())
+            && left.getType().equals(right.getType())
+            && left.getRegion().equals(right.getRegion());
     }
 
     @Override
@@ -231,7 +263,7 @@ public class ClanFinderPlugin extends Plugin implements ClanFinderPanel.ClanFind
             }
             catch (Exception ex)
             {
-                log.warn("Unable to load ClanFinder clan detail", ex);
+                log.warn("Unable to load Clan Finder clan detail", ex);
                 javax.swing.SwingUtilities.invokeLater(() ->
                 {
                     if (panel != null)

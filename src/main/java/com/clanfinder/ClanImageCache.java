@@ -103,7 +103,7 @@ final class ClanImageCache
         connection.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
         connection.setReadTimeout(READ_TIMEOUT_MILLIS);
         connection.setRequestProperty("Accept", "image/jpeg,image/png");
-        connection.setRequestProperty("User-Agent", "ClanFinder-RuneLite-Plugin/0.1.0");
+        connection.setRequestProperty("User-Agent", "ClanFinder-RuneLite-Plugin/0.1.2");
 
         int status = connection.getResponseCode();
         if (status < 200 || status >= 300)

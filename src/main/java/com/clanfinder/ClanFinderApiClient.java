@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -14,10 +15,12 @@ final class ClanFinderApiClient
 {
     static final String DEFAULT_BASE_URL = "https://osrsclanfinder.com";
 
-    private static final int CONNECT_TIMEOUT_MILLIS = 5000;
-    private static final int READ_TIMEOUT_MILLIS = 8000;
+    private static final int CONNECT_TIMEOUT_MILLIS = 8000;
+    private static final int READ_TIMEOUT_MILLIS = 15000;
+    private static final int MAX_ATTEMPTS = 3;
+    private static final int RETRY_DELAY_MILLIS = 1000;
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-    private static final String USER_AGENT = "ClanFinder-RuneLite-Plugin/0.1.0";
+    private static final String USER_AGENT = "ClanFinder-RuneLite-Plugin/0.1.2";
 
     private final Gson gson;
     private final String baseUrl;
@@ -30,22 +33,14 @@ final class ClanFinderApiClient
 
     ClanSearchResponse search(ClanSearchQuery query) throws IOException
     {
-        HttpURLConnection connection = openConnection(buildClansUrl(query));
-        connection.setRequestMethod("GET");
-        connection.setRequestProperty("Accept", "application/json");
-
-        String body = readSuccessfulResponse(connection);
+        String body = readJsonWithRetry(buildClansUrl(query));
         ClanSearchResponse response = gson.fromJson(body, ClanSearchResponse.class);
         return response == null ? new ClanSearchResponse() : response;
     }
 
     ClanListing getClan(String slug) throws IOException
     {
-        HttpURLConnection connection = openConnection(buildClanUrl(slug));
-        connection.setRequestMethod("GET");
-        connection.setRequestProperty("Accept", "application/json");
-
-        String body = readSuccessfulResponse(connection);
+        String body = readJsonWithRetry(buildClanUrl(slug));
         ClanListing clan = gson.fromJson(body, ClanListing.class);
         return clan == null ? new ClanListing() : clan;
     }
@@ -101,6 +96,63 @@ final class ClanFinderApiClient
         connection.setReadTimeout(READ_TIMEOUT_MILLIS);
         connection.setRequestProperty("User-Agent", USER_AGENT);
         return connection;
+    }
+
+    private String readJsonWithRetry(String url) throws IOException
+    {
+        IOException failure = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)
+        {
+            HttpURLConnection connection = null;
+            try
+            {
+                connection = openConnection(url);
+                connection.setRequestMethod("GET");
+                connection.setRequestProperty("Accept", "application/json");
+                return readSuccessfulResponse(connection);
+            }
+            catch (IOException ex)
+            {
+                failure = ex;
+                if (attempt >= MAX_ATTEMPTS || !isRetryable(ex))
+                {
+                    throw ex;
+                }
+
+                sleepBeforeRetry();
+            }
+            finally
+            {
+                if (connection != null)
+                {
+                    connection.disconnect();
+                }
+            }
+        }
+
+        throw failure == null ? new IOException("ClanFinder API request failed.") : failure;
+    }
+
+    private static boolean isRetryable(IOException ex)
+    {
+        String message = ex.getMessage();
+        return message == null || (!message.startsWith("ClanFinder API returned HTTP ") &&
+            !"ClanFinder API response is too large.".equals(message));
+    }
+
+    private static void sleepBeforeRetry() throws IOException
+    {
+        try
+        {
+            Thread.sleep(RETRY_DELAY_MILLIS);
+        }
+        catch (InterruptedException ex)
+        {
+            Thread.currentThread().interrupt();
+            InterruptedIOException interrupted = new InterruptedIOException("Interrupted before retrying ClanFinder API request.");
+            interrupted.initCause(ex);
+            throw interrupted;
+        }
     }
 
     private static void appendParam(StringBuilder url, String key, String value)

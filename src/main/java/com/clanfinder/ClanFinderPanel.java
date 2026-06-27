@@ -56,6 +56,7 @@ import javax.swing.text.AbstractDocument;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.BoxView;
 import javax.swing.text.ComponentView;
+import javax.swing.text.DefaultCaret;
 import javax.swing.text.Element;
 import javax.swing.text.IconView;
 import javax.swing.text.LabelView;
@@ -165,12 +166,17 @@ final class ClanFinderPanel extends PluginPanel
     private final JLabel statusLabel = new JLabel("Ready");
     private final JPanel controlsWrapper;
     private final JPanel resultsPanel = new JPanel();
+    private final JScrollPane resultsScrollPane;
+    private JPanel controlsPanel;
+    private JPanel searchControlsPanel;
+    private JButton searchToggleButton;
     private final List<ClanListing> displayedClans = new ArrayList<>();
     private ClanSearchQuery currentQuery = new ClanSearchQuery("", "", "", 25);
     private int currentPage = 1;
     private int displayedCount;
     private int totalCount;
     private boolean loadingMore;
+    private boolean searchControlsExpanded = true;
 
     ClanFinderPanel(ClanFinderPanelListener listener)
     {
@@ -188,15 +194,15 @@ final class ClanFinderPanel extends PluginPanel
 
         controlsWrapper = buildControlsWrapper();
         add(controlsWrapper, BorderLayout.NORTH);
-        JScrollPane scrollPane = new JScrollPane(resultsPanel);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.setBackground(PANEL_BACKGROUND);
-        scrollPane.setOpaque(true);
-        scrollPane.getViewport().setBackground(PANEL_BACKGROUND);
-        scrollPane.getViewport().setOpaque(true);
-        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        add(scrollPane, BorderLayout.CENTER);
+        resultsScrollPane = new JScrollPane(resultsPanel);
+        resultsScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        resultsScrollPane.setBackground(PANEL_BACKGROUND);
+        resultsScrollPane.setOpaque(true);
+        resultsScrollPane.getViewport().setBackground(PANEL_BACKGROUND);
+        resultsScrollPane.getViewport().setOpaque(true);
+        resultsScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        resultsScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        add(resultsScrollPane, BorderLayout.CENTER);
         statusLabel.setForeground(TEXT_MUTED);
         statusLabel.setFont(statusLabel.getFont().deriveFont(Font.PLAIN, 10.5f));
         statusLabel.setBorder(new EmptyBorder(2, 2, 0, 2));
@@ -215,9 +221,9 @@ final class ClanFinderPanel extends PluginPanel
         resultsPanel.removeAll();
         resultsPanel.add(buildStateCard(
             "Loading clans",
-            "Fetching approved listings from ClanFinder."
+            "Fetching approved listings from Clan Finder."
         ));
-        refreshResults();
+        refreshResults(true);
     }
 
     void showLoadingMore()
@@ -232,7 +238,7 @@ final class ClanFinderPanel extends PluginPanel
         );
         loadingCard.setName("loading-more-clans");
         resultsPanel.add(loadingCard);
-        refreshResults();
+        refreshResults(false);
     }
 
     void showResults(ClanSearchResponse response)
@@ -276,7 +282,13 @@ final class ClanFinderPanel extends PluginPanel
         totalCount = pagination.getTotal();
         addSeeMoreButtonIfNeeded();
         statusLabel.setText("Showing " + displayedCount + " of " + totalCount + " approved clans");
-        refreshResults();
+        refreshResults(!append);
+    }
+
+    void showCachedResults(ClanSearchResponse response, String statusText)
+    {
+        showResults(response);
+        statusLabel.setText(statusText);
     }
 
     void showClanDetailLoading(ClanListing clan)
@@ -289,9 +301,9 @@ final class ClanFinderPanel extends PluginPanel
         resultsPanel.add(Box.createVerticalStrut(8));
         resultsPanel.add(buildStateCard(
             "Loading clan details",
-            "Fetching the latest profile and event details from ClanFinder."
+            "Fetching the latest profile and event details from Clan Finder."
         ));
-        refreshResults();
+        refreshResults(true);
     }
 
     void showClanDetail(ClanListing clan)
@@ -308,7 +320,7 @@ final class ClanFinderPanel extends PluginPanel
         resultsPanel.add(buildBackButtonRow());
         resultsPanel.add(Box.createVerticalStrut(8));
         resultsPanel.add(buildClanDetailPage(clan, notice));
-        refreshResults();
+        refreshResults(true);
     }
 
     void showAddClanPage()
@@ -320,7 +332,7 @@ final class ClanFinderPanel extends PluginPanel
         resultsPanel.add(buildBackButtonRow());
         resultsPanel.add(Box.createVerticalStrut(8));
         resultsPanel.add(buildAddClanPage());
-        refreshResults();
+        refreshResults(true);
     }
 
     void showLoadMoreError()
@@ -329,20 +341,21 @@ final class ClanFinderPanel extends PluginPanel
         removeLoadingMoreMessage();
         addSeeMoreButtonIfNeeded();
         statusLabel.setText("Could not load more clans");
-        refreshResults();
+        refreshResults(false);
     }
 
     void showError(String message)
     {
-        statusLabel.setText("Unable to load ClanFinder");
+        statusLabel.setText("Unable to load Clan Finder");
         resultsPanel.removeAll();
         resultsPanel.add(buildStateCard("Unable to load clans", message));
-        refreshResults();
+        refreshResults(true);
     }
 
     private JPanel buildControls()
     {
         JPanel controls = new JPanel(new GridBagLayout());
+        controlsPanel = controls;
         controls.setBackground(PANEL_BACKGROUND);
         controls.setOpaque(true);
         typeSelect.setRenderer(new ClanTypeOptionRenderer());
@@ -358,13 +371,47 @@ final class ClanFinderPanel extends PluginPanel
         constraints.fill = GridBagConstraints.HORIZONTAL;
         constraints.insets = new Insets(0, 0, 6, 0);
 
+        JPanel titleRow = new JPanel(new BorderLayout(6, 0));
+        titleRow.setOpaque(false);
+        titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
         JLabel title = new JLabel("Clan Finder");
         title.setForeground(TEXT_PRIMARY);
         title.setFont(title.getFont().deriveFont(Font.BOLD, 16.2f));
         title.setBorder(new EmptyBorder(0, 0, 2, 0));
-        controls.add(title, constraints);
+        titleRow.add(title, BorderLayout.WEST);
+
+        searchToggleButton = new JButton(new MinusIcon());
+        searchToggleButton.setName("search-toggle-button");
+        styleToggleButton(searchToggleButton);
+        searchToggleButton.addActionListener(event -> setSearchControlsExpanded(!searchControlsExpanded));
+        titleRow.add(searchToggleButton, BorderLayout.EAST);
+
+        controls.add(titleRow, constraints);
+
+        searchControlsPanel = buildSearchControlsPanel();
+        searchControlsPanel.setName("search-controls-panel");
 
         constraints.gridy++;
+        controls.add(searchControlsPanel, constraints);
+
+        updateControlsPanelSize();
+        return controls;
+    }
+
+    private JPanel buildSearchControlsPanel()
+    {
+        JPanel controls = new JPanel(new GridBagLayout());
+        controls.setBackground(PANEL_BACKGROUND);
+        controls.setOpaque(true);
+
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.gridx = 0;
+        constraints.gridy = 0;
+        constraints.weightx = 1;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+        constraints.insets = new Insets(0, 0, 6, 0);
+
         controls.add(searchField, constraints);
 
         constraints.gridy++;
@@ -392,12 +439,6 @@ final class ClanFinderPanel extends PluginPanel
         searchField.addActionListener(event -> requestSearch());
         typeSelect.addActionListener(event -> requestSearch());
         regionSelect.addActionListener(event -> requestSearch());
-
-        Dimension preferred = controls.getPreferredSize();
-        Dimension fixed = new Dimension(CARD_WIDTH, preferred.height);
-        controls.setPreferredSize(fixed);
-        controls.setMinimumSize(fixed);
-        controls.setMaximumSize(fixed);
         return controls;
     }
 
@@ -408,6 +449,46 @@ final class ClanFinderPanel extends PluginPanel
         wrapper.setOpaque(true);
         wrapper.add(buildControls());
         return wrapper;
+    }
+
+    private void setSearchControlsExpanded(boolean expanded)
+    {
+        searchControlsExpanded = expanded;
+        if (searchControlsPanel != null)
+        {
+            searchControlsPanel.setVisible(expanded);
+        }
+        if (searchToggleButton != null)
+        {
+            searchToggleButton.setIcon(expanded ? new MinusIcon() : new PlusIcon());
+            searchToggleButton.setToolTipText(expanded ? "Hide search controls" : "Show search controls");
+        }
+
+        updateControlsPanelSize();
+        if (controlsWrapper != null)
+        {
+            controlsWrapper.revalidate();
+            controlsWrapper.repaint();
+        }
+        revalidate();
+        repaint();
+    }
+
+    private void updateControlsPanelSize()
+    {
+        if (controlsPanel == null)
+        {
+            return;
+        }
+
+        controlsPanel.setPreferredSize(null);
+        controlsPanel.setMinimumSize(null);
+        controlsPanel.setMaximumSize(null);
+        Dimension preferred = controlsPanel.getPreferredSize();
+        Dimension fixed = new Dimension(CARD_WIDTH, preferred.height);
+        controlsPanel.setPreferredSize(fixed);
+        controlsPanel.setMinimumSize(fixed);
+        controlsPanel.setMaximumSize(fixed);
     }
 
     private JPanel buildClanCard(ClanListing clan)
@@ -733,7 +814,7 @@ final class ClanFinderPanel extends PluginPanel
         JLabel label = new JLabel(memberCountText(clan));
         label.setForeground(TEXT_MUTED);
         label.setFont(label.getFont().deriveFont(Font.BOLD, MEMBER_FONT_SIZE));
-        label.setToolTipText("Listed member total from ClanFinder website data. This is not live online status.");
+        label.setToolTipText("Listed member total from Clan Finder website data. This is not live online status.");
 
         row.add(label, BorderLayout.WEST);
 
@@ -873,6 +954,7 @@ final class ClanFinderPanel extends PluginPanel
         JTextPane pane = new WrappingTextPane(width);
         pane.setEditorKit(new WrappingStyledEditorKit());
         pane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+        ((DefaultCaret) pane.getCaret()).setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
         pane.setOpaque(false);
         pane.setEditable(false);
         pane.setFocusable(false);
@@ -886,6 +968,7 @@ final class ClanFinderPanel extends PluginPanel
             textAttributes(textFont.getFamily(), style, size, color),
             textAttributes(EMOJI_FONT_FAMILY, Font.PLAIN, size, color)
         );
+        pane.setCaretPosition(0);
 
         pane.setSize(new Dimension(width, Integer.MAX_VALUE));
         Dimension preferred = pane.getPreferredSize();
@@ -1070,7 +1153,7 @@ final class ClanFinderPanel extends PluginPanel
 
         addSeeMoreButtonIfNeeded();
         statusLabel.setText("Showing " + displayedCount + " of " + totalCount + " approved clans");
-        refreshResults();
+        refreshResults(true);
     }
 
     private JPanel buildBackButtonRow()
@@ -1420,7 +1503,7 @@ final class ClanFinderPanel extends PluginPanel
                 }
                 catch (BadLocationException ex)
                 {
-                    throw new IllegalStateException("Unable to render ClanFinder emoji.", ex);
+                    throw new IllegalStateException("Unable to render Clan Finder emoji.", ex);
                 }
 
                 offset += Character.charCount(codePoint);
@@ -1438,7 +1521,7 @@ final class ClanFinderPanel extends PluginPanel
             }
             catch (BadLocationException ex)
             {
-                throw new IllegalStateException("Unable to render ClanFinder text.", ex);
+                throw new IllegalStateException("Unable to render Clan Finder text.", ex);
             }
 
             offset += Character.charCount(codePoint);
@@ -2172,6 +2255,19 @@ final class ClanFinderPanel extends PluginPanel
         button.setOpaque(true);
     }
 
+    private static void styleToggleButton(JButton button)
+    {
+        button.setFocusPainted(false);
+        button.setBackground(ACTION_BACKGROUND);
+        button.setForeground(TEXT_PRIMARY);
+        button.setBorder(new EmptyBorder(5, 7, 5, 7));
+        button.setOpaque(true);
+        button.setPreferredSize(new Dimension(28, 26));
+        button.setMinimumSize(new Dimension(28, 26));
+        button.setMaximumSize(new Dimension(28, 26));
+        button.setToolTipText("Hide search controls");
+    }
+
     private static String truncate(String value, int maxLength)
     {
         if (value.length() <= maxLength)
@@ -2182,7 +2278,7 @@ final class ClanFinderPanel extends PluginPanel
         return value.substring(0, Math.max(0, maxLength - 3)).trim() + "...";
     }
 
-    private void refreshResults()
+    private void refreshResults(boolean resetScroll)
     {
         if (controlsWrapper != null)
         {
@@ -2199,6 +2295,22 @@ final class ClanFinderPanel extends PluginPanel
         }
         revalidate();
         repaint();
+
+        if (resetScroll)
+        {
+            resetResultsScroll();
+        }
+    }
+
+    private void resetResultsScroll()
+    {
+        resultsScrollPane.getViewport().setViewPosition(new java.awt.Point(0, 0));
+        resultsScrollPane.getVerticalScrollBar().setValue(0);
+        SwingUtilities.invokeLater(() ->
+        {
+            resultsScrollPane.getViewport().setViewPosition(new java.awt.Point(0, 0));
+            resultsScrollPane.getVerticalScrollBar().setValue(0);
+        });
     }
 
     private void setControlsVisible(boolean visible)
@@ -2431,6 +2543,13 @@ final class ClanFinderPanel extends PluginPanel
         {
             Dimension preferred = super.getPreferredSize();
             return new Dimension(width, preferred.height);
+        }
+
+        @Override
+        public void scrollRectToVisible(java.awt.Rectangle rect)
+        {
+            // Read-only text blocks are embedded inside the result list. The text
+            // caret must never drive the parent JScrollPane position during layout.
         }
     }
 
@@ -2830,6 +2949,41 @@ final class ClanFinderPanel extends PluginPanel
                 g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                 g.setColor(TEXT_PRIMARY);
                 g.drawLine(SIZE / 2, 3, SIZE / 2, SIZE - 3);
+                g.drawLine(3, SIZE / 2, SIZE - 3, SIZE / 2);
+            }
+            finally
+            {
+                g.dispose();
+            }
+        }
+    }
+
+    private static final class MinusIcon implements Icon
+    {
+        private static final int SIZE = 14;
+
+        @Override
+        public int getIconWidth()
+        {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight()
+        {
+            return SIZE;
+        }
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y)
+        {
+            Graphics2D g = (Graphics2D) graphics.create();
+            try
+            {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.translate(x, y);
+                g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g.setColor(TEXT_PRIMARY);
                 g.drawLine(3, SIZE / 2, SIZE - 3, SIZE / 2);
             }
             finally
