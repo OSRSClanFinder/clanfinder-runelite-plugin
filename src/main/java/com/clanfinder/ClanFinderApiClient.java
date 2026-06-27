@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InterruptedIOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -18,7 +17,6 @@ final class ClanFinderApiClient
     private static final int CONNECT_TIMEOUT_MILLIS = 8000;
     private static final int READ_TIMEOUT_MILLIS = 15000;
     private static final int MAX_ATTEMPTS = 3;
-    private static final int RETRY_DELAY_MILLIS = 1000;
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final String USER_AGENT = "ClanFinder-RuneLite-Plugin/0.1.2";
 
@@ -118,8 +116,6 @@ final class ClanFinderApiClient
                 {
                     throw ex;
                 }
-
-                sleepBeforeRetry();
             }
             finally
             {
@@ -138,21 +134,6 @@ final class ClanFinderApiClient
         String message = ex.getMessage();
         return message == null || (!message.startsWith("ClanFinder API returned HTTP ") &&
             !"ClanFinder API response is too large.".equals(message));
-    }
-
-    private static void sleepBeforeRetry() throws IOException
-    {
-        try
-        {
-            Thread.sleep(RETRY_DELAY_MILLIS);
-        }
-        catch (InterruptedException ex)
-        {
-            Thread.currentThread().interrupt();
-            InterruptedIOException interrupted = new InterruptedIOException("Interrupted before retrying ClanFinder API request.");
-            interrupted.initCause(ex);
-            throw interrupted;
-        }
     }
 
     private static void appendParam(StringBuilder url, String key, String value)
